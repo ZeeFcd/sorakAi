@@ -1,0 +1,152 @@
+openapi: 3.1.0
+info:
+  title: sorakAi RAG
+  description: Retrieval and LLM answer generation
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      tags:
+      - ops
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      tags:
+      - ops
+      summary: Ready
+      operationId: ready_ready_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+  /v1/query:
+    post:
+      tags:
+      - rag
+      summary: Query
+      operationId: query_v1_query_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+          default: ok
+        service:
+          type: string
+          title: Service
+      type: object
+      required:
+      - service
+      title: HealthResponse
+    QueryRequest:
+      properties:
+        question:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Question
+      type: object
+      required:
+      - question
+      title: QueryRequest
+      example:
+        question: What does foo return?
+    QueryResponse:
+      properties:
+        answer:
+          type: string
+          title: Answer
+        context_preview:
+          type: string
+          title: Context Preview
+          description: Short preview of retrieved chunk
+      type: object
+      required:
+      - answer
+      - context_preview
+      title: QueryResponse
+    ReadinessResponse:
+      properties:
+        ready:
+          type: boolean
+          title: Ready
+        service:
+          type: string
+          title: Service
+        detail:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Detail
+      type: object
+      required:
+      - ready
+      - service
+      title: ReadinessResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

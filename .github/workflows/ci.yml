@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest --cov=sorakai --cov-report=term
+
+      - name: OpenAPI specs match code
+        run: python scripts/export_openapi.py --check --output openapi
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        service: [gateway, ingest, rag]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image (${{ matrix.service }})
+        run: |
+          docker build \
+            --build-arg SORAKAI_SERVICE=${{ matrix.service }} \
+            -t sorakai-${{ matrix.service }}:ci .
+
+      - name: Smoke health (${{ matrix.service }})
+        run: |
+          PORT=8000
+          if [ "${{ matrix.service }}" = "ingest" ]; then PORT=8001; fi
+          if [ "${{ matrix.service }}" = "rag" ]; then PORT=8002; fi
+          docker run -d --name m -e PORT=$PORT -p ${PORT}:${PORT} sorakai-${{ matrix.service }}:ci
+          sleep 3
+          curl -sf "http://127.0.0.1:${PORT}/health"
+          curl -sf "http://127.0.0.1:${PORT}/openapi.bundled.json" | head -c 200
+          docker rm -f m

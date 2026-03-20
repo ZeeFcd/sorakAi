@@ -1,0 +1,52 @@
+# Local stack: Redis (shared KB) + ingest, RAG, gateway.
+# MLflow: run separately, e.g. `mlflow server --host 0.0.0.0 --port 5000`
+# then set MLFLOW_TRACKING_URI=http://host.docker.internal:5000 on ingest/rag (Linux: use host IP).
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SORAKAI_SERVICE: ingest
+    environment:
+      PORT: "8001"
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+
+  rag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SORAKAI_SERVICE: rag
+    environment:
+      PORT: "8002"
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8002:8002"
+    depends_on:
+      - redis
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SORAKAI_SERVICE: gateway
+    environment:
+      PORT: "8000"
+      INGEST_SERVICE_URL: http://ingest:8001
+      RAG_SERVICE_URL: http://rag:8002
+    ports:
+      - "8000:8000"
+    depends_on:
+      - ingest
+      - rag

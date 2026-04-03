@@ -6,14 +6,17 @@ on:
   pull_request:
     branches: [main, master]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -34,7 +37,7 @@ jobs:
       matrix:
         service: [gateway, ingest, rag]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build image (${{ matrix.service }})
         run: |
@@ -43,12 +46,15 @@ jobs:
             -t sorakai-${{ matrix.service }}:ci .
 
       - name: Smoke health (${{ matrix.service }})
+        env:
+          SERVICE: ${{ matrix.service }}
         run: |
           PORT=8000
-          if [ "${{ matrix.service }}" = "ingest" ]; then PORT=8001; fi
-          if [ "${{ matrix.service }}" = "rag" ]; then PORT=8002; fi
-          docker run -d --name m -e PORT=$PORT -p ${PORT}:${PORT} sorakai-${{ matrix.service }}:ci
+          if [ "$SERVICE" = "ingest" ]; then PORT=8001; fi
+          if [ "$SERVICE" = "rag" ]; then PORT=8002; fi
+          CT_NAME="sorakai-smoke-${SERVICE}"
+          docker run -d --name "$CT_NAME" -e PORT=$PORT -p ${PORT}:${PORT} sorakai-${SERVICE}:ci
           sleep 3
           curl -sf "http://127.0.0.1:${PORT}/health"
           curl -sf "http://127.0.0.1:${PORT}/openapi.bundled.json" | head -c 200
-          docker rm -f m
+          docker rm -f "$CT_NAME"

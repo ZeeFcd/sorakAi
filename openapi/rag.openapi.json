@@ -34,7 +34,9 @@
       },
       "QueryRequest": {
         "example": {
-          "question": "What does foo return?"
+          "question": "What does foo return?",
+          "session_id": "user-42",
+          "top_k": 5
         },
         "properties": {
           "question": {
@@ -42,6 +44,33 @@
             "minLength": 1,
             "title": "Question",
             "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "If set, prior turns in this session are sent to the model and updated after each reply.",
+            "title": "Session Id"
+          },
+          "top_k": {
+            "default": 5,
+            "description": "Number of KB chunks to merge into context",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "type": "integer"
+          },
+          "use_chat_history": {
+            "default": true,
+            "description": "If false, session_id is ignored (stateless turn).",
+            "title": "Use Chat History",
+            "type": "boolean"
           }
         },
         "required": [
@@ -57,9 +86,27 @@
             "type": "string"
           },
           "context_preview": {
-            "description": "Short preview of retrieved chunk",
+            "description": "Short preview of merged retrieval context",
             "title": "Context Preview",
             "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo when conversation state was used",
+            "title": "Session Id"
+          },
+          "sources_used": {
+            "default": 0,
+            "description": "How many KB chunks were merged into context",
+            "title": "Sources Used",
+            "type": "integer"
           }
         },
         "required": [

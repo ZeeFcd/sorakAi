@@ -21,3 +21,4 @@ def test_ingest_document():
         data = r.json()
         assert data["num_chunks"] >= 1
         assert "x.py" in data["message"]
+        assert "document_id" in data and len(data["document_id"]) > 0

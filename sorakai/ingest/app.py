@@ -15,7 +15,13 @@ from sorakai.common.ingest import process_file
 from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
 from sorakai.common.mlflow_tracking import log_params_metrics, mlflow_run
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
-from sorakai.common.schemas import DocumentIngestRequest, DocumentIngestResponse, HealthResponse, ReadinessResponse
+from sorakai.common.schemas import (
+    DocumentIngestRequest,
+    DocumentIngestResponse,
+    HealthResponse,
+    ReadinessResponse,
+    new_document_id,
+)
 from sorakai.common.store import KnowledgeStore, RedisKnowledgeStore, create_store
 
 logger = get_logger("sorakai.ingest")
@@ -94,18 +100,29 @@ def create_app() -> FastAPI:
         if not chunks:
             raise HTTPException(status_code=400, detail="No chunks produced from content")
         vectors = embed_chunks(chunks)
-        await store.save(chunks, vectors)
+        doc_id = body.document_id or new_document_id()
+        if body.replace_kb:
+            await store.clear_all()
+        await store.append_document(doc_id, body.filename, chunks, vectors)
 
         with mlflow_run("sorakai-ingest", run_name=f"ingest-{body.filename}"):
             log_params_metrics(
-                {"filename": body.filename, "chunk_size": body.chunk_size, "service": "ingest"},
+                {
+                    "filename": body.filename,
+                    "chunk_size": body.chunk_size,
+                    "service": "ingest",
+                    "replace_kb": body.replace_kb,
+                },
                 {"num_chunks": float(len(chunks))},
             )
 
         return DocumentIngestResponse(
-            message=f"Stored {len(chunks)} chunks for '{body.filename}'",
+            message=f"Stored {len(chunks)} chunks for '{body.filename}' (append)"
+            if not body.replace_kb
+            else f"Replaced KB with {len(chunks)} chunks from '{body.filename}'",
             num_chunks=len(chunks),
             filename=body.filename,
+            document_id=doc_id,
         )
 
     register_bundled_openapi_routes(app, "ingest")

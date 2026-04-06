@@ -27,10 +27,42 @@ def retrieve_best_chunk(
     stored_embeddings: list[np.ndarray],
     chunks: list[str],
 ) -> str:
-    if not stored_embeddings or not chunks:
-        logger.warning("Empty store")
-        return ""
+    ctx, _n = retrieve_top_k_context(query_embedding, stored_embeddings, chunks, top_k=1)
+    return ctx
+
+
+def retrieve_top_k_context(
+    query_embedding: np.ndarray,
+    stored_embeddings: list[np.ndarray],
+    chunks: list[str],
+    top_k: int = 5,
+) -> tuple[str, int]:
+    """
+    Return merged context from the top-k most similar chunks (by cosine similarity).
+    Deduplicates identical chunk text. Second return value is number of chunks merged.
+    """
+    if not stored_embeddings or not chunks or len(stored_embeddings) != len(chunks):
+        logger.warning("Empty or mismatched store")
+        return "", 0
+
+    k = max(1, min(top_k, len(chunks)))
     sims = [cosine_similarity(query_embedding, emb) for emb in stored_embeddings]
-    best_idx = int(np.argmax(sims))
-    logger.info("Best similarity: %.4f", sims[best_idx])
-    return chunks[best_idx]
+    ranked = sorted(range(len(sims)), key=lambda i: sims[i], reverse=True)
+
+    seen_text: set[str] = set()
+    selected: list[str] = []
+    for idx in ranked:
+        if len(selected) >= k:
+            break
+        text = chunks[idx]
+        if text in seen_text:
+            continue
+        seen_text.add(text)
+        selected.append(text)
+
+    if not selected:
+        return "", 0
+
+    logger.info("Top similarity: %.4f (using %s chunks)", sims[ranked[0]], len(selected))
+    merged = "\n\n---\n\n".join(selected)
+    return merged, len(selected)

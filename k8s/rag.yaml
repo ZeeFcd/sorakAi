@@ -37,6 +37,8 @@ spec:
               value: "8002"
             - name: REDIS_URL
               value: redis://redis.sorakai.svc.cluster.local:6379/0
+            - name: MLFLOW_TRACKING_URI
+              value: http://mlflow.sorakai.svc.cluster.local:5000
           readinessProbe:
             httpGet:
               path: /ready

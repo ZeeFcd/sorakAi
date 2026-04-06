@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field, ConfigDict
+import uuid
+
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class DocumentIngestRequest(BaseModel):
@@ -7,23 +9,54 @@ class DocumentIngestRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=512)
     content: str = Field(..., min_length=1)
     chunk_size: int = Field(default=500, ge=50, le=10_000)
+    document_id: str | None = Field(
+        default=None,
+        description="Stable id for this document; generated if omitted.",
+        max_length=128,
+    )
+    replace_kb: bool = Field(
+        default=False,
+        description="If true, remove all existing knowledge before adding this document.",
+    )
+
+    @field_validator("document_id")
+    @classmethod
+    def doc_id_ok(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            return None
+        return v
 
 
 class DocumentIngestResponse(BaseModel):
     message: str
     num_chunks: int
     filename: str
+    document_id: str = Field(description="Id of the stored document (use for traceability)")
 
 
 class QueryRequest(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": {"question": "What does foo return?"}})
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"question": "What does foo return?", "session_id": "user-42", "top_k": 5}}
+    )
 
     question: str = Field(..., min_length=1, max_length=4000)
+    session_id: str | None = Field(
+        default=None,
+        description="If set, prior turns in this session are sent to the model and updated after each reply.",
+        max_length=128,
+    )
+    top_k: int = Field(default=5, ge=1, le=20, description="Number of KB chunks to merge into context")
+    use_chat_history: bool = Field(
+        default=True,
+        description="If false, session_id is ignored (stateless turn).",
+    )
 
 
 class QueryResponse(BaseModel):
     answer: str
-    context_preview: str = Field(description="Short preview of retrieved chunk")
+    context_preview: str = Field(description="Short preview of merged retrieval context")
+    sources_used: int = Field(default=0, description="How many KB chunks were merged into context")
+    session_id: str | None = Field(default=None, description="Echo when conversation state was used")
 
 
 class HealthResponse(BaseModel):
@@ -35,3 +68,7 @@ class ReadinessResponse(BaseModel):
     ready: bool
     service: str
     detail: str | None = None
+
+
+def new_document_id() -> str:
+    return str(uuid.uuid4())

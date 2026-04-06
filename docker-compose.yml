@@ -1,11 +1,64 @@
-# Local stack: Redis (shared KB) + ingest, RAG, gateway.
-# MLflow: run separately, e.g. `mlflow server --host 0.0.0.0 --port 5000`
-# then set MLFLOW_TRACKING_URI=http://host.docker.internal:5000 on ingest/rag (Linux: use host IP).
+# Local stack: Redis + Ollama + MLflow + ingest, RAG, gateway.
+# Override model: OLLAMA_MODEL=phi3:mini docker compose up --build
+# MLflow UI: http://127.0.0.1:5000
 services:
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 25s
+
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 25s
+
+  # One-shot: pull via Ollama HTTP API (CLI `ollama pull` may try to open a TUI without /dev/tty).
+  ollama-model:
+    image: curlimages/curl:8.11.1
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    # One list element = one argument to sh -c (avoids misparsing that runs bare `set` and dumps env).
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling model $$OLLAMA_MODEL ..."
+        curl -sS -N -X POST "http://ollama:11434/api/pull" \
+          -H "Content-Type: application/json" \
+          -d "{\"name\":\"$$OLLAMA_MODEL\"}"
+        echo "Pull finished."
+    restart: "no"
 
   ingest:
     build:
@@ -16,10 +69,14 @@ services:
     environment:
       PORT: "8001"
       REDIS_URL: redis://redis:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     ports:
       - "8001:8001"
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      mlflow:
+        condition: service_healthy
 
   rag:
     build:
@@ -30,10 +87,20 @@ services:
     environment:
       PORT: "8002"
       REDIS_URL: redis://redis:6379/0
+      # Self-hosted LLM (Ollama OpenAI-compatible API)
+      OPENAI_BASE_URL: http://ollama:11434/v1
+      OPENAI_API_KEY: ollama
+      OPENAI_CHAT_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     ports:
       - "8002:8002"
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      mlflow:
+        condition: service_healthy
+      ollama-model:
+        condition: service_completed_successfully
 
   gateway:
     build:
@@ -50,3 +117,7 @@ services:
     depends_on:
       - ingest
       - rag
+
+volumes:
+  ollama_data:
+  mlflow_data:

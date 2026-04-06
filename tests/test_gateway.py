@@ -32,6 +32,7 @@ def test_gateway_proxy_ingest(gateway_app):
                 "message": "ok",
                 "num_chunks": 2,
                 "filename": "a.py",
+                "document_id": "00000000-0000-0000-0000-000000000001",
             },
         )
     )
@@ -46,7 +47,12 @@ def test_gateway_proxy_query(gateway_app):
     respx.post("http://rag.test/v1/query").mock(
         return_value=httpx.Response(
             200,
-            json={"answer": "42", "context_preview": "def foo"},
+            json={
+                "answer": "42",
+                "context_preview": "def foo",
+                "sources_used": 1,
+                "session_id": None,
+            },
         )
     )
     with TestClient(gateway_app) as client:

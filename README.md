@@ -26,6 +26,18 @@ uvicorn sorakai.gateway.app:app --reload --port 8000
 
 Set the same `REDIS_URL` on ingest and RAG when running as separate processes.
 
+### Embeddings (ingest + RAG)
+
+`EMBEDDING_PROVIDER` controls how chunks and queries are vectorized:
+
+| Provider | Env | Notes |
+|----------|-----|--------|
+| `char` (default) | — | Pseudo-vectors; no semantics; good for **tests** / offline. |
+| `ollama` | `OLLAMA_EMBED_BASE_URL` (e.g. `http://ollama:11434`), `OLLAMA_EMBEDDING_MODEL` (e.g. `nomic-embed-text`) | **Docker Compose** sets this and pulls the embed model with the chat model. |
+| `openai` | `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL` (default `text-embedding-3-small`) | Optional `OPENAI_EMBEDDINGS_BASE_URL` for Azure/proxies (not the Ollama chat URL). |
+
+**Important:** query and stored chunks must use the **same** provider and model dimensions; changing provider after ingesting requires **re-ingesting** or `replace_kb: true`.
+
 ### LLM backends (RAG service)
 
 Priority in `sorakai/common/llm.py`:

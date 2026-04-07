@@ -27,6 +27,17 @@ class Settings(BaseSettings):
     # Chat history in Redis (0 = no expiry)
     chat_history_ttl_seconds: int = Field(default=604_800, alias="CHAT_HISTORY_TTL_SECONDS")
 
+    # Embeddings: char | openai | ollama (see sorakai/common/embedding.py)
+    embedding_provider: str = Field(default="char", alias="EMBEDDING_PROVIDER")
+    openai_embedding_model: str = Field(default="text-embedding-3-small", alias="OPENAI_EMBEDDING_MODEL")
+    openai_embeddings_base_url: str | None = Field(default=None, alias="OPENAI_EMBEDDINGS_BASE_URL")
+    ollama_embed_base_url: str | None = Field(
+        default=None,
+        alias="OLLAMA_EMBED_BASE_URL",
+        description="Ollama root URL for /api/embeddings (not .../v1)",
+    )
+    ollama_embedding_model: str = Field(default="nomic-embed-text", alias="OLLAMA_EMBEDDING_MODEL")
+
 
 @lru_cache
 def get_settings() -> Settings:

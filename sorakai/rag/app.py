@@ -102,7 +102,7 @@ def create_app() -> FastAPI:
         if not loaded:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No documents in knowledge base")
         chunks, embeddings = loaded
-        q_emb = embed_chunks([body.question])[0]
+        q_emb = (await embed_chunks([body.question]))[0]
         context, n_sources = retrieve_top_k_context(q_emb, embeddings, chunks, top_k=body.top_k)
         if not context:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not retrieve context")

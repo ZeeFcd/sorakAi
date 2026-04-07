@@ -1,0 +1,49 @@
+# Ollama for chat (/v1) and embeddings (/api/embeddings). Pull models after deploy, e.g.:
+# kubectl -n sorakai exec deploy/ollama -- ollama pull llama3.2:1b
+# kubectl -n sorakai exec deploy/ollama -- ollama pull nomic-embed-text
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: sorakai
+spec:
+  ports:
+    - port: 11434
+      targetPort: http
+  selector:
+    app: ollama
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: sorakai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - name: http
+              containerPort: 11434
+          volumeMounts:
+            - name: data
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "8Gi"
+              cpu: "4"
+      volumes:
+        - name: data
+          emptyDir: {}

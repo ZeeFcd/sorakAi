@@ -16,9 +16,18 @@
    kubectl apply -f k8s/namespace.yaml
    kubectl apply -f k8s/redis.yaml
    kubectl apply -f k8s/mlflow.yaml
+   kubectl apply -f k8s/ollama.yaml
    kubectl apply -f k8s/ingest.yaml
    kubectl apply -f k8s/rag.yaml
    kubectl apply -f k8s/gateway.yaml
+   ```
+
+   Pull Ollama models (ingest/RAG use **semantic embeddings** + chat):
+
+   ```bash
+   kubectl -n sorakai rollout status deploy/ollama
+   kubectl -n sorakai exec deploy/ollama -- ollama pull llama3.2:1b
+   kubectl -n sorakai exec deploy/ollama -- ollama pull nomic-embed-text
    ```
 
 3. Port-forward the gateway:

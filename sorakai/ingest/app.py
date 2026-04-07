@@ -99,7 +99,7 @@ def create_app() -> FastAPI:
         chunks = process_file(body.content, body.chunk_size)
         if not chunks:
             raise HTTPException(status_code=400, detail="No chunks produced from content")
-        vectors = embed_chunks(chunks)
+        vectors = await embed_chunks(chunks)
         doc_id = body.document_id or new_document_id()
         if body.replace_kb:
             await store.clear_all()

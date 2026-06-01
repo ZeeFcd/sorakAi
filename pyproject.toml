@@ -5,15 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sorakai"
 version = "0.1.0"
-description = "Microservices MVP: ingest, RAG, gateway + MLflow hooks"
+description = "Microservices for ingest, RAG, and API gateway. Fully local (Ollama), provider-pluggable behind LangChain interfaces."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["sorakai*"]
 
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
@@ -23,3 +26,111 @@ addopts = "-q --tb=short"
 [tool.coverage.run]
 source = ["sorakai"]
 branch = true
+
+# ---------------------------------------------------------------------------
+# ruff: lint + format. Replaces black + isort + flake8.
+# Wave 0 of the overhaul plan enables PLC0415 (no inside-function imports).
+# Per-file PLC0415 ignores are removed wave-by-wave as each file is rewritten.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["openapi"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # flake8-bugbear
+  "UP",   # pyupgrade
+  "SIM",  # flake8-simplify
+  "RUF",  # ruff-specific
+  "TID",  # flake8-tidy-imports
+  "C4",   # flake8-comprehensions
+  "ASYNC",
+  "PLC0415",  # import-outside-top-level  <-- the rule that bans inside-function imports
+]
+ignore = [
+  "E501",  # line length handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Inside-function imports that will be removed in later waves of the overhaul plan.
+# Each entry below MUST disappear when its wave lands.
+"sorakai/common/chat_history.py"     = ["PLC0415"]                    # removed in Wave 1
+"sorakai/common/llm.py"              = ["PLC0415"]                    # removed in Wave 1
+"sorakai/common/embedding.py"        = ["PLC0415", "ASYNC109"]        # removed in Wave 1 / Wave 2 (timeout param)
+"sorakai/common/store.py"            = ["PLC0415", "B905"]            # removed in Wave 4 (zip strict=)
+"sorakai/common/mlflow_tracking.py"  = ["PLC0415"]                    # removed in Wave 8
+# Test files use `pytest.importorskip` style and module-level fixtures; PLC0415 is too aggressive there.
+"tests/**" = ["PLC0415"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sorakai"]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ---------------------------------------------------------------------------
+# mypy: strict on new code (sorakai.core.*), permissive on the legacy modules
+# that will be rewritten in later waves. Each override is removed as its wave
+# lands and the file becomes strict-clean.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+exclude = ["openapi/", "build/", ".venv/"]
+
+[[tool.mypy.overrides]]
+# Legacy modules: typed as best-effort, will be brought to strict in their waves.
+# Each error code disabled here is paid back by the wave that rewrites the file.
+module = [
+  "sorakai.common.chat_history",      # tightened in Wave 1
+  "sorakai.common.config",            # tightened in Wave 1
+  "sorakai.common.embedding",         # tightened in Wave 1 + Wave 2
+  "sorakai.common.ingest",            # tightened in Wave 3
+  "sorakai.common.llm",               # tightened in Wave 1
+  "sorakai.common.logging_utils",     # tightened in Wave 8
+  "sorakai.common.mlflow_tracking",   # tightened in Wave 8
+  "sorakai.common.openapi_bundle",    # tightened in Wave 11
+  "sorakai.common.retrieval",         # tightened in Wave 2
+  "sorakai.common.schemas",           # tightened in Wave 3
+  "sorakai.common.store",             # tightened in Wave 4 + Wave 5
+  "sorakai.gateway.app",              # tightened in Wave 10
+  "sorakai.ingest.app",               # tightened in Wave 4
+  "sorakai.rag.app",                  # tightened in Wave 6
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false
+disable_error_code = ["arg-type", "attr-defined", "no-any-return", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+# Tests don't need return-type annotations on every fixture; keep them readable.
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_return_any = false
+check_untyped_defs = true
+disable_error_code = ["attr-defined", "arg-type", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+# Third-party libraries without type stubs.
+module = [
+  "fakeredis",
+  "fakeredis.*",
+  "mlflow",
+  "mlflow.*",
+  "openai",
+  "openai.*",
+  "respx",
+  "respx.*",
+]
+ignore_missing_imports = true

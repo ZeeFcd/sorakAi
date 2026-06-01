@@ -2,7 +2,6 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from sorakai.rag.app import create_app
-from tests.conftest import run_async
 
 
 def test_rag_health_ready():
@@ -12,11 +11,11 @@ def test_rag_health_ready():
         assert client.get("/ready").json()["ready"] is True
 
 
-def test_rag_query_after_seed():
+def test_rag_query_after_seed(run_async):
     app = create_app()
     with TestClient(app) as client:
         run_async(
-            client.app.state.store.save(
+            app.state.store.save(
                 ["def foo():\n    return 42\n"],
                 [np.array([1.0, 2.0, 3.0], dtype=float)],
             )

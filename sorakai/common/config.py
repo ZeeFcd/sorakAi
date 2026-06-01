@@ -9,6 +9,11 @@ class Settings(BaseSettings):
 
     project_name: str = "sorakAi"
     environment: str = Field(default="dev", description="dev|staging|prod")
+    log_level: str = Field(
+        default="INFO",
+        alias="LOG_LEVEL",
+        description="Python logging level for sorakai.* loggers (DEBUG|INFO|WARNING|ERROR).",
+    )
 
     redis_url: str | None = Field(default=None, description="redis://host:6379/0 — if unset, in-memory store")
 

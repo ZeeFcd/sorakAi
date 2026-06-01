@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, status
@@ -21,6 +21,7 @@ from sorakai.common.schemas import (
     QueryResponse,
     ReadinessResponse,
 )
+from sorakai.core.logging import configure_logging
 
 logger = get_logger("sorakai.gateway")
 
@@ -28,6 +29,7 @@ logger = get_logger("sorakai.gateway")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    configure_logging(settings.log_level)
     timeout = httpx.Timeout(settings.request_timeout_seconds)
     app.state.http = httpx.AsyncClient(timeout=timeout)
     logger.info("Gateway started")
@@ -95,7 +97,7 @@ def create_app() -> FastAPI:
                 r = await http.get(f"{url.rstrip('/')}/health")
                 if r.status_code != 200:
                     errors.append(f"{name}:{r.status_code}")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 errors.append(f"{name}:{e!s}")
         if errors:
             return ReadinessResponse(ready=False, service="gateway", detail=";".join(errors))
@@ -141,7 +143,7 @@ def create_app() -> FastAPI:
         if r.status_code >= 400:
             try:
                 detail = r.json().get("detail", r.text)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 detail = r.text
             raise HTTPException(status_code=r.status_code, detail=detail)
         return QueryResponse.model_validate(r.json())

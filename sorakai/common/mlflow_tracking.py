@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 from sorakai.common.logging_utils import get_logger
 
@@ -24,7 +25,7 @@ def mlflow_run(experiment_name: str, run_name: str | None = None) -> Iterator[An
         mlflow.set_experiment(experiment_name)
         with mlflow.start_run(run_name=run_name) as run:
             yield run
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("MLflow run skipped: %s", e)
         yield None
 
@@ -39,5 +40,5 @@ def log_params_metrics(params: dict[str, Any], metrics: dict[str, float]) -> Non
             mlflow.log_param(k, v)
         for k, v in metrics.items():
             mlflow.log_metric(k, v)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("MLflow log failed: %s", e)

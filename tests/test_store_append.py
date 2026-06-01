@@ -2,13 +2,12 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from sorakai.rag.app import create_app as create_rag
-from tests.conftest import run_async
 
 
-def test_two_documents_in_kb_top_k_merge():
+def test_two_documents_in_kb_top_k_merge(run_async):
     rag = create_rag()
     with TestClient(rag) as rc:
-        store = rc.app.state.store
+        store = rag.state.store
         run_async(store.clear_all())
         run_async(
             store.append_document(
@@ -33,12 +32,12 @@ def test_two_documents_in_kb_top_k_merge():
         assert body["sources_used"] <= 2
 
 
-def test_session_memory_stub():
+def test_session_memory_stub(run_async):
     """Same session_id: second question sees prior turn in stub suffix."""
     rag = create_rag()
     with TestClient(rag) as rc:
         run_async(
-            rc.app.state.store.append_document(
+            rag.state.store.append_document(
                 "d",
                 "f.txt",
                 ["Paris is the capital of France."],

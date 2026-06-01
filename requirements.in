@@ -1,0 +1,22 @@
+# Runtime dependencies. Compile to requirements.txt with:
+#   make lock
+# which runs `pip-compile --resolver=backtracking --strip-extras requirements.in`.
+
+# --- Web ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+
+# --- Config & validation ---
+pydantic>=2.7.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
+
+# --- Data / ML ---
+numpy>=1.26.0
+openai>=1.40.0     # removed in Wave 1 (Ollama-only collapse)
+mlflow>=2.14.0
+
+# --- Storage ---
+redis>=5.0.0

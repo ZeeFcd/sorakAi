@@ -8,6 +8,10 @@ import importlib
 import json
 import sys
 from pathlib import Path
+from typing import Any, cast
+
+import yaml
+from fastapi import FastAPI
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -20,19 +24,19 @@ SERVICES: dict[str, tuple[str, str]] = {
 }
 
 
-def build_app(module_name: str, factory_name: str):
+def build_app(module_name: str, factory_name: str) -> FastAPI:
     mod = importlib.import_module(module_name)
     factory = getattr(mod, factory_name)
-    return factory()
+    return cast(FastAPI, factory())
 
 
-def openapi_schema(name: str) -> dict:
+def openapi_schema(name: str) -> dict[str, Any]:
     module_name, factory_name = SERVICES[name]
     app = build_app(module_name, factory_name)
     return app.openapi()
 
 
-def canonical_json(schema: dict) -> str:
+def canonical_json(schema: dict[str, Any]) -> str:
     return json.dumps(schema, indent=2, sort_keys=True) + "\n"
 
 
@@ -42,8 +46,6 @@ def write_artifacts(name: str, out_dir: Path, write_yaml: bool) -> None:
     json_path = out_dir / f"{name}.openapi.json"
     json_path.write_text(canonical_json(schema), encoding="utf-8")
     if write_yaml:
-        import yaml
-
         yaml_path = out_dir / f"{name}.openapi.yaml"
         yaml_path.write_text(
             yaml.dump(schema, sort_keys=False, allow_unicode=True, default_flow_style=False),

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List
-
 import httpx
 import numpy as np
 
@@ -13,12 +11,12 @@ from sorakai.common.logging_utils import get_logger
 logger = get_logger("sorakai.embedding")
 
 
-def _embed_char(chunks: List[str]) -> list[np.ndarray]:
+def _embed_char(chunks: list[str]) -> list[np.ndarray]:
     """Deterministic pseudo-embeddings (no semantics) for tests / offline dev."""
     return [np.array([float(ord(c) % 128) for c in chunk[:512]], dtype=float) for chunk in chunks]
 
 
-async def _embed_openai(chunks: List[str], model: str, api_key: str, base_url: str | None) -> list[np.ndarray]:
+async def _embed_openai(chunks: list[str], model: str, api_key: str, base_url: str | None) -> list[np.ndarray]:
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(api_key=api_key, base_url=base_url) if base_url else AsyncOpenAI(api_key=api_key)
@@ -29,7 +27,7 @@ async def _embed_openai(chunks: List[str], model: str, api_key: str, base_url: s
 
 
 async def _embed_ollama(
-    chunks: List[str],
+    chunks: list[str],
     base_url: str,
     model: str,
     timeout: float,
@@ -51,7 +49,7 @@ async def _embed_ollama(
     return out
 
 
-async def embed_chunks(chunks: List[str]) -> list[np.ndarray]:
+async def embed_chunks(chunks: list[str]) -> list[np.ndarray]:
     """
     Embed text chunks for retrieval.
 

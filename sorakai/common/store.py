@@ -64,7 +64,9 @@ class KnowledgeStore(ABC):
             )
         await self._write_entries(entries)
 
-    async def replace_entire_kb(self, chunks: list[str], embeddings: list[np.ndarray], filename: str = "inline") -> None:
+    async def replace_entire_kb(
+        self, chunks: list[str], embeddings: list[np.ndarray], filename: str = "inline"
+    ) -> None:
         """Replace the whole KB with a single synthetic document."""
         doc_id = str(uuid.uuid4())
         new_entries: list[ChunkEntry] = []

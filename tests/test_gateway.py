@@ -64,9 +64,7 @@ def test_gateway_proxy_query(gateway_app):
 @respx.mock
 def test_gateway_ready_upstream_unhealthy(gateway_app):
     respx.get("http://ingest.test/health").mock(return_value=httpx.Response(503))
-    respx.get("http://rag.test/health").mock(
-        return_value=httpx.Response(200, json={"status": "ok", "service": "rag"})
-    )
+    respx.get("http://rag.test/health").mock(return_value=httpx.Response(200, json={"status": "ok", "service": "rag"}))
     with TestClient(gateway_app) as client:
         r = client.get("/ready")
         assert r.status_code == 200
@@ -78,9 +76,7 @@ def test_gateway_ready_all_ok(gateway_app):
     respx.get("http://ingest.test/health").mock(
         return_value=httpx.Response(200, json={"status": "ok", "service": "ingest"})
     )
-    respx.get("http://rag.test/health").mock(
-        return_value=httpx.Response(200, json={"status": "ok", "service": "rag"})
-    )
+    respx.get("http://rag.test/health").mock(return_value=httpx.Response(200, json={"status": "ok", "service": "rag"}))
     with TestClient(gateway_app) as client:
         r = client.get("/ready")
         assert r.status_code == 200

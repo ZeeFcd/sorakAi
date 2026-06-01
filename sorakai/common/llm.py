@@ -71,6 +71,6 @@ def ask_llm(
             temperature=0.2,
         )
         return (resp.choices[0].message.content or "").strip()
-    except Exception as e:  # noqa: BLE001 — surface to client in MVP
+    except Exception as e:
         logger.exception("LLM call failed")
         return f"[error] LLM failed: {e}"

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 from abc import ABC, abstractmethod
-from typing import Any
 
 MAX_MESSAGES = 40  # cap stored turns (~20 user/assistant pairs)
 SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
@@ -16,7 +15,7 @@ def validate_session_id(session_id: str | None) -> str | None:
     if session_id is None or session_id == "":
         return None
     if not SESSION_ID_PATTERN.match(session_id):
-        raise ValueError("session_id must be 1–128 chars: letters, digits, ._-")
+        raise ValueError("session_id must be 1-128 chars: letters, digits, ._-")
     return session_id
 
 

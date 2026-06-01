@@ -4,13 +4,14 @@ Microservices MVP: **gateway** (8000), **ingest** (8001), **RAG** (8002), **Redi
 
 ## Environment
 
+Linux-only. Tested on Python 3.12 (see `python:3.12-slim` in [Dockerfile](Dockerfile)).
 Create and use a virtualenv (path is up to you, e.g. `.venv` or `<YOUR_VENV>`):
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-pytest tests --cov=sorakai --cov-report=term
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt          # runtime + tests + lint
+make lint typecheck test                     # full pre-merge check
 ```
 
 ## Run services (dev)

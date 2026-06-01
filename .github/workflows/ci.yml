@@ -18,11 +18,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: |
+          ruff check sorakai tests scripts
+          ruff format --check sorakai tests scripts
+
+      - name: Typecheck (mypy --strict)
+        run: mypy sorakai tests scripts
 
       - name: Run tests
         run: pytest --cov=sorakai --cov-report=term

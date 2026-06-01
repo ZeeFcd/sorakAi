@@ -1,0 +1,21 @@
+# Dev / CI dependencies. Compile to requirements-dev.txt with:
+#   make lock
+
+-r requirements.in
+
+# --- Tests ---
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0
+fakeredis>=2.20.0
+respx>=0.21.0
+
+# --- Lint / format / type checks ---
+ruff>=0.6.0
+mypy>=1.10.0
+pre-commit>=3.7.0
+pip-tools>=7.4.0
+
+# --- Type stubs ---
+types-PyYAML
+types-redis

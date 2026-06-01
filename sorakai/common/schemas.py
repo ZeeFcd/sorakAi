@@ -1,10 +1,12 @@
 import uuid
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DocumentIngestRequest(BaseModel):
-    model_config = ConfigDict(json_schema_extra={"example": {"filename": "main.py", "content": "def foo():\n    return 42\n"}})
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"filename": "main.py", "content": "def foo():\n    return 42\n"}}
+    )
 
     filename: str = Field(..., min_length=1, max_length=512)
     content: str = Field(..., min_length=1)

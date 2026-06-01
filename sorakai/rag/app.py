@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,7 @@ from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.retrieval import retrieve_top_k_context
 from sorakai.common.schemas import HealthResponse, QueryRequest, QueryResponse, ReadinessResponse
 from sorakai.common.store import KnowledgeStore, RedisKnowledgeStore, create_store
+from sorakai.core.logging import configure_logging
 
 logger = get_logger("sorakai.rag")
 
@@ -26,6 +27,7 @@ logger = get_logger("sorakai.rag")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    configure_logging(settings.log_level)
     store = create_store(settings.redis_url)
     chat = create_chat_store(settings.redis_url, ttl_seconds=settings.chat_history_ttl_seconds)
     app.state.store = store

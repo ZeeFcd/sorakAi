@@ -12,6 +12,12 @@ from sorakai import __version__
 from sorakai.common.chat_history import RedisChatHistoryStore, create_chat_store, validate_session_id
 from sorakai.common.config import get_settings
 from sorakai.common.embedding import embed_chunks
+from sorakai.common.kb_meta import (
+    KBMeta,
+    KBMetaStore,
+    RedisKBMetaStore,
+    create_kb_meta_store,
+)
 from sorakai.common.llm import ask_llm
 from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
 from sorakai.common.mlflow_tracking import log_params_metrics, mlflow_run
@@ -19,6 +25,7 @@ from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.retrieval import retrieve_top_k_context
 from sorakai.common.schemas import HealthResponse, QueryRequest, QueryResponse, ReadinessResponse
 from sorakai.common.store import KnowledgeStore, RedisKnowledgeStore, create_store
+from sorakai.core.errors import DimensionMismatchError
 from sorakai.core.logging import configure_logging
 
 logger = get_logger("sorakai.rag")
@@ -34,8 +41,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ttl_seconds=settings.chat_history_ttl_seconds,
         max_messages=settings.chat_history_max_messages,
     )
+    kb_meta = create_kb_meta_store(settings.redis_url)
     app.state.store = store
     app.state.chat_store = chat
+    app.state.kb_meta = kb_meta
     logger.info(
         "RAG service started (redis=%s, llm_provider=%s, embedding_provider=%s)",
         bool(settings.redis_url),
@@ -47,6 +56,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await store.aclose()
     if isinstance(chat, RedisChatHistoryStore):
         await chat.aclose()
+    if isinstance(kb_meta, RedisKBMetaStore):
+        await kb_meta.aclose()
     logger.info("RAG service shutdown")
 
 
@@ -114,6 +125,8 @@ def create_app() -> FastAPI:
     async def query(body: QueryRequest, request: Request) -> QueryResponse:
         store: KnowledgeStore = request.app.state.store
         chat_store = request.app.state.chat_store
+        kb_meta: KBMetaStore = request.app.state.kb_meta
+        settings = get_settings()
 
         try:
             sid = validate_session_id(body.session_id) if body.use_chat_history else None
@@ -125,6 +138,46 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No documents in knowledge base")
         chunks, embeddings = loaded
         q_emb = (await embed_chunks([body.question]))[0]
+
+        # Dim guard: query must use the same provider/model/dim as the stored KB.
+        stored_meta = await kb_meta.read()
+        if stored_meta is not None:
+            candidate = KBMeta(
+                provider=settings.embedding_provider,
+                model=settings.ollama_embedding_model,
+                dim=q_emb.size,
+            )
+            if not stored_meta.matches(candidate):
+                exc = DimensionMismatchError(
+                    expected_provider=stored_meta.provider,
+                    expected_model=stored_meta.model,
+                    expected_dim=stored_meta.dim,
+                    actual_provider=candidate.provider,
+                    actual_model=candidate.model,
+                    actual_dim=candidate.dim,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "embedding_metadata_mismatch",
+                        "message": str(exc),
+                        "expected": {
+                            "provider": exc.expected_provider,
+                            "model": exc.expected_model,
+                            "dim": exc.expected_dim,
+                        },
+                        "actual": {
+                            "provider": exc.actual_provider,
+                            "model": exc.actual_model,
+                            "dim": exc.actual_dim,
+                        },
+                        "hint": (
+                            "Re-ingest the corpus with the current provider/model, "
+                            "or POST to /v1/documents with replace_kb=true."
+                        ),
+                    },
+                ) from exc
+
         context, n_sources = retrieve_top_k_context(q_emb, embeddings, chunks, top_k=body.top_k)
         if not context:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not retrieve context")

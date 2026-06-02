@@ -9,6 +9,7 @@ retires them.
 
 from sorakai.core.errors import (
     ConfigError,
+    DimensionMismatchError,
     EmbeddingError,
     LLMError,
     RetrievalError,
@@ -19,6 +20,7 @@ from sorakai.core.logging import configure_logging, get_logger
 
 __all__ = [
     "ConfigError",
+    "DimensionMismatchError",
     "EmbeddingError",
     "LLMError",
     "RetrievalError",

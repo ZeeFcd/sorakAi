@@ -43,9 +43,30 @@ registry entry - see "Adding a new provider" below.
 Local dev: `ollama serve`, `ollama pull llama3.2:1b`, `ollama pull nomic-embed-text`,
 then the RAG / ingest services Just Work with their defaults.
 
-**Important:** query and stored chunks must use the **same** embeddings provider
-and model dimensions. Changing provider after ingesting requires re-ingesting or
-`replace_kb: true` (Wave 2 of the overhaul plan adds an automatic dim-guard).
+**Dim-guard (Wave 2).** The KB stamps the `{provider, model, dim}` triple it was
+built with into `sorakai:kb:meta` on first ingest. Every later ingest and every
+query is verified against that triple; a mismatch returns **`409 Conflict`** with
+a JSON body explaining `expected` vs `actual`. The fix is either to re-ingest the
+corpus with the current provider/model, or to POST `/v1/documents` again with
+`replace_kb: true` (which atomically clears the chunks and the meta record).
+This replaces the silent zero-padding that used to mask cross-model vector
+arithmetic.
+
+### Ollama embeddings tuning
+
+The Ollama adapter (`sorakai/infra/embeddings/ollama.py`) is batched and
+concurrent. Defaults are sensible for a single-host setup; the knobs:
+
+| Env | Default | What it does |
+|-----|---------|--------------|
+| `OLLAMA_EMBED_BATCH` | `64` | Max inputs per `/api/embed` request body. |
+| `OLLAMA_EMBED_CONCURRENCY` | `4` | Max in-flight embed requests (bounded by an asyncio.Semaphore). |
+| `OLLAMA_EMBED_TIMEOUT_SECONDS` | `60.0` | Per-request timeout, separate from the gateway proxy timeout. |
+| `OLLAMA_EMBED_USE_BATCH_ENDPOINT` | `true` | Set to `false` to force the legacy per-input `/api/embeddings` (older Ollama). The adapter also falls back automatically on a 404. |
+
+Empty / whitespace-only chunks are filtered before the network call and
+zero-vectors are reinserted at the original indices, so the returned list
+always aligns 1:1 with the input list.
 
 ### Adding a new provider
 

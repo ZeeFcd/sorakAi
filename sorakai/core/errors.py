@@ -31,5 +31,35 @@ class EmbeddingError(SorakaiError):
     """Embeddings provider call failed."""
 
 
+class DimensionMismatchError(EmbeddingError):
+    """A query / chunk vector's dimension or model differs from what the KB was built with.
+
+    Carries the conflicting metadata so handlers can render a 409 explaining
+    whether the caller needs to re-ingest or pass ``replace_kb=true``.
+    """
+
+    def __init__(
+        self,
+        *,
+        expected_provider: str,
+        expected_model: str,
+        expected_dim: int,
+        actual_provider: str,
+        actual_model: str,
+        actual_dim: int,
+    ) -> None:
+        self.expected_provider = expected_provider
+        self.expected_model = expected_model
+        self.expected_dim = expected_dim
+        self.actual_provider = actual_provider
+        self.actual_model = actual_model
+        self.actual_dim = actual_dim
+        super().__init__(
+            f"Embedding metadata mismatch: KB was built with "
+            f"provider={expected_provider!r} model={expected_model!r} dim={expected_dim}, "
+            f"but caller is using provider={actual_provider!r} model={actual_model!r} dim={actual_dim}."
+        )
+
+
 class RetrievalError(SorakaiError):
     """Retrieval pipeline produced no usable context."""

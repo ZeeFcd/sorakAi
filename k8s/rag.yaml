@@ -39,16 +39,14 @@ spec:
               value: redis://redis.sorakai.svc.cluster.local:6379/0
             - name: MLFLOW_TRACKING_URI
               value: http://mlflow.sorakai.svc.cluster.local:5000
-            - name: OPENAI_BASE_URL
-              value: http://ollama.sorakai.svc.cluster.local:11434/v1
-            - name: OPENAI_API_KEY
+            - name: LLM_PROVIDER
               value: ollama
-            - name: OPENAI_CHAT_MODEL
-              value: llama3.2:1b
             - name: EMBEDDING_PROVIDER
               value: ollama
-            - name: OLLAMA_EMBED_BASE_URL
+            - name: OLLAMA_BASE_URL
               value: http://ollama.sorakai.svc.cluster.local:11434
+            - name: OLLAMA_CHAT_MODEL
+              value: llama3.2:1b
             - name: OLLAMA_EMBEDDING_MODEL
               value: nomic-embed-text
           readinessProbe:

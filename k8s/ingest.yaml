@@ -41,7 +41,7 @@ spec:
               value: http://mlflow.sorakai.svc.cluster.local:5000
             - name: EMBEDDING_PROVIDER
               value: ollama
-            - name: OLLAMA_EMBED_BASE_URL
+            - name: OLLAMA_BASE_URL
               value: http://ollama.sorakai.svc.cluster.local:11434
             - name: OLLAMA_EMBEDDING_MODEL
               value: nomic-embed-text

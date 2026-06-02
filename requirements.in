@@ -15,8 +15,11 @@ pyyaml>=6.0.0
 
 # --- Data / ML ---
 numpy>=1.26.0
-openai>=1.40.0     # removed in Wave 1 (Ollama-only collapse)
 mlflow>=2.14.0
+
+# --- LLM / embeddings (provider-pluggable; only Ollama adapter shipped) ---
+langchain-core>=0.3.0
+langchain-ollama>=0.2.0
 
 # --- Storage ---
 redis>=5.0.0

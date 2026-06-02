@@ -38,6 +38,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Gateway shutdown")
 
 
+def _install_cors(app: FastAPI) -> None:
+    """Install the CORS middleware.
+
+    Browsers reject ``Access-Control-Allow-Origin: *`` together with
+    ``Access-Control-Allow-Credentials: true``, so we never combine them.
+    """
+    origins = get_settings().cors_origins
+    allow_credentials = "*" not in origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="sorakAi Gateway",
@@ -51,13 +68,7 @@ def create_app() -> FastAPI:
         ],
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    _install_cors(app)
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):

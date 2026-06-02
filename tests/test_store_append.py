@@ -32,8 +32,13 @@ def test_two_documents_in_kb_top_k_merge(run_async):
         assert body["sources_used"] <= 2
 
 
-def test_session_memory_stub(run_async):
-    """Same session_id: second question sees prior turn in stub suffix."""
+def test_session_memory_persists_across_turns(run_async):
+    """Two POSTs with the same ``session_id`` produce a 2-turn history in the chat store.
+
+    The assertion is provider-agnostic - it inspects the chat store directly
+    instead of pattern-matching the stub answer text - so it stays valid the
+    day we swap the stub for a real model.
+    """
     rag = create_rag()
     with TestClient(rag) as rc:
         run_async(
@@ -48,11 +53,16 @@ def test_session_memory_stub(run_async):
             "/v1/query",
             json={"question": "What is the capital?", "session_id": "u1", "use_chat_history": True},
         )
-        assert r1.status_code == 200
+        assert r1.status_code == 200, r1.text
         r2 = rc.post(
             "/v1/query",
             json={"question": "Repeat that in one word.", "session_id": "u1", "use_chat_history": True},
         )
-        assert r2.status_code == 200
+        assert r2.status_code == 200, r2.text
         assert r2.json()["session_id"] == "u1"
-        assert "+2 prior msgs" in r2.json()["answer"]
+
+        history = run_async(rag.state.chat_store.get_messages("u1"))
+        roles = [m["role"] for m in history]
+        assert roles == ["user", "assistant", "user", "assistant"]
+        assert history[0]["content"] == "What is the capital?"
+        assert history[2]["content"] == "Repeat that in one word."

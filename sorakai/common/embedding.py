@@ -1,93 +1,38 @@
-"""Chunk embeddings: semantic (OpenAI / Ollama) or legacy char fallback."""
+"""Thin embeddings shim used by ingest and RAG.
+
+Delegates to :func:`sorakai.infra.embeddings.get_embeddings`; the actual
+provider-specific code lives in ``sorakai/infra/embeddings/<provider>.py``.
+The shim exists for two reasons: (1) it keeps the legacy import path
+``from sorakai.common.embedding import embed_chunks`` working while we move
+code into ``sorakai.infra``, and (2) it converts to ``numpy`` arrays for the
+current cosine-similarity retrieval code (Wave 2 stacks these into a matrix).
+"""
 
 from __future__ import annotations
 
-import httpx
 import numpy as np
 
 from sorakai.common.config import get_settings
-from sorakai.common.logging_utils import get_logger
+from sorakai.core.logging import get_logger
+from sorakai.infra.embeddings import get_embeddings
 
-logger = get_logger("sorakai.embedding")
-
-
-def _embed_char(chunks: list[str]) -> list[np.ndarray]:
-    """Deterministic pseudo-embeddings (no semantics) for tests / offline dev."""
-    return [np.array([float(ord(c) % 128) for c in chunk[:512]], dtype=float) for chunk in chunks]
-
-
-async def _embed_openai(chunks: list[str], model: str, api_key: str, base_url: str | None) -> list[np.ndarray]:
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url) if base_url else AsyncOpenAI(api_key=api_key)
-    # Single batch when possible (OpenAI supports multiple inputs per request)
-    resp = await client.embeddings.create(model=model, input=list(chunks))
-    ordered = sorted(resp.data, key=lambda d: d.index)
-    return [np.array(item.embedding, dtype=np.float32) for item in ordered]
-
-
-async def _embed_ollama(
-    chunks: list[str],
-    base_url: str,
-    model: str,
-    timeout: float,
-) -> list[np.ndarray]:
-    base = base_url.rstrip("/")
-    out: list[np.ndarray] = []
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for i, text in enumerate(chunks):
-            r = await client.post(
-                f"{base}/api/embeddings",
-                json={"model": model, "prompt": text},
-            )
-            r.raise_for_status()
-            data = r.json()
-            emb = data.get("embedding")
-            if not emb:
-                raise RuntimeError(f"Ollama embeddings: missing 'embedding' in response for chunk {i}")
-            out.append(np.array(emb, dtype=np.float32))
-    return out
+logger = get_logger(__name__)
 
 
 async def embed_chunks(chunks: list[str]) -> list[np.ndarray]:
-    """
-    Embed text chunks for retrieval.
-
-    Provider from ``EMBEDDING_PROVIDER``:
-
-    - ``char`` — fast local pseudo-vectors (default; good for CI / no network).
-    - ``openai`` — ``OPENAI_API_KEY`` + ``OPENAI_EMBEDDING_MODEL`` (default ``text-embedding-3-small``).
-      Optional ``OPENAI_EMBEDDINGS_BASE_URL`` for Azure / proxies (not the Ollama chat URL).
-    - ``ollama`` — ``OLLAMA_EMBED_BASE_URL`` (e.g. ``http://ollama:11434``) + ``OLLAMA_EMBEDDING_MODEL``
-      (e.g. ``nomic-embed-text``); calls ``POST /api/embeddings`` per chunk.
-    """
+    """Embed ``chunks`` with the currently-configured provider."""
     if not chunks:
         return []
-
     settings = get_settings()
-    provider = (settings.embedding_provider or "char").strip().lower()
-    logger.info("Embedding %s chunks via provider=%s", len(chunks), provider)
+    embeddings = get_embeddings(settings)
+    logger.info("Embedding %d chunks via provider=%s", len(chunks), settings.embedding_provider)
+    vectors = await embeddings.aembed_documents(chunks)
+    return [np.asarray(v, dtype=np.float32) for v in vectors]
 
-    if provider == "char":
-        return _embed_char(chunks)
 
-    if provider == "openai":
-        key = settings.openai_api_key
-        if not key:
-            raise RuntimeError("EMBEDDING_PROVIDER=openai requires OPENAI_API_KEY")
-        base = settings.openai_embeddings_base_url
-        return await _embed_openai(chunks, settings.openai_embedding_model, key, base)
-
-    if provider == "ollama":
-        base = settings.ollama_embed_base_url
-        if not base:
-            raise RuntimeError("EMBEDDING_PROVIDER=ollama requires OLLAMA_EMBED_BASE_URL (e.g. http://ollama:11434)")
-        return await _embed_ollama(
-            chunks,
-            base,
-            settings.ollama_embedding_model,
-            settings.request_timeout_seconds * 4,
-        )
-
-    logger.warning("Unknown EMBEDDING_PROVIDER=%r; using char fallback", provider)
-    return _embed_char(chunks)
+async def embed_query(text: str) -> np.ndarray:
+    """Embed a single query string with the currently-configured provider."""
+    settings = get_settings()
+    embeddings = get_embeddings(settings)
+    vector = await embeddings.aembed_query(text)
+    return np.asarray(vector, dtype=np.float32)

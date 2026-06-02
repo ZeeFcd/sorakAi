@@ -27,28 +27,49 @@ uvicorn sorakai.gateway.app:app --reload --port 8000
 
 Set the same `REDIS_URL` on ingest and RAG when running as separate processes.
 
-### Embeddings (ingest + RAG)
+### Fully local - never calls a cloud LLM provider
 
-`EMBEDDING_PROVIDER` controls how chunks and queries are vectorized:
+sorakAi only ships adapters for local Ollama (chat + embeddings) and a deterministic
+test stub. There are no cloud SDKs in `requirements.txt` and no `OPENAI_*` env vars.
+The architecture is provider-pluggable behind LangChain's `BaseChatModel` and
+`Embeddings` interfaces, so swapping or adding a host is one new file plus one
+registry entry - see "Adding a new provider" below.
 
-| Provider | Env | Notes |
-|----------|-----|--------|
-| `char` (default) | — | Pseudo-vectors; no semantics; good for **tests** / offline. |
-| `ollama` | `OLLAMA_EMBED_BASE_URL` (e.g. `http://ollama:11434`), `OLLAMA_EMBEDDING_MODEL` (e.g. `nomic-embed-text`) | **Docker Compose** sets this and pulls the embed model with the chat model. |
-| `openai` | `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL` (default `text-embedding-3-small`) | Optional `OPENAI_EMBEDDINGS_BASE_URL` for Azure/proxies (not the Ollama chat URL). |
+| Layer | Default provider | Env knob | Notes |
+|-------|------------------|----------|-------|
+| Chat model | `ollama` | `LLM_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_CHAT_MODEL` | Tests flip `LLM_PROVIDER=stub` via conftest. |
+| Embeddings | `ollama` | `EMBEDDING_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` | `EMBEDDING_PROVIDER=char` gives offline pseudo-vectors for tests. |
 
-**Important:** query and stored chunks must use the **same** provider and model dimensions; changing provider after ingesting requires **re-ingesting** or `replace_kb: true`.
+Local dev: `ollama serve`, `ollama pull llama3.2:1b`, `ollama pull nomic-embed-text`,
+then the RAG / ingest services Just Work with their defaults.
 
-### LLM backends (RAG service)
+**Important:** query and stored chunks must use the **same** embeddings provider
+and model dimensions. Changing provider after ingesting requires re-ingesting or
+`replace_kb: true` (Wave 2 of the overhaul plan adds an automatic dim-guard).
 
-Priority in `sorakai/common/llm.py`:
+### Adding a new provider
 
-1. **`OPENAI_BASE_URL`** set → OpenAI-compatible HTTP API (e.g. **Ollama** at `http://127.0.0.1:11434/v1`). `OPENAI_API_KEY` optional (Ollama uses a dummy value if unset). Set **`OPENAI_CHAT_MODEL`** to the Ollama tag (e.g. `llama3.2:1b`).
-2. Else **`OPENAI_API_KEY`** set → OpenAI cloud (default base URL).
-3. Else → **stub** answer (no model).
+The factories live under `sorakai/infra/llm/` and `sorakai/infra/embeddings/` and
+are tiny:
 
-Local dev with Ollama on the host: run `ollama serve`, `ollama pull llama3.2:1b`, then start RAG with  
-`OPENAI_BASE_URL=http://127.0.0.1:11434/v1` and `OPENAI_CHAT_MODEL=llama3.2:1b`.
+```python
+# sorakai/infra/llm/<your_provider>.py
+from langchain_<your_provider> import Chat<YourProvider>
+from sorakai.common.config import Settings
+from sorakai.infra.llm.base import BaseChatModel
+
+def build_<your_provider>_chat(settings: Settings) -> BaseChatModel:
+    return Chat<YourProvider>(model=settings.<your_provider>_chat_model, ...)
+```
+
+```python
+# sorakai/infra/llm/factory.py  (add one line)
+from sorakai.infra.llm.<your_provider> import build_<your_provider>_chat
+CHAT_MODEL_REGISTRY["<your_provider>"] = build_<your_provider>_chat
+```
+
+Then extend `LLMProvider = Literal["ollama","stub",...]` in `sorakai/common/config.py`
+and you're done; no chain, agent, ingest, or RAG handler touches the change.
 
 ### Storage (Redis)
 
@@ -75,4 +96,3 @@ Includes **Ollama**, **MLflow** (UI at **http://127.0.0.1:5000**), Redis, ingest
 OLLAMA_MODEL=phi3:mini docker compose up --build
 ```
 
-**OpenAI cloud instead of Ollama:** use a `docker-compose.override.yml` (not committed) to remove `OPENAI_BASE_URL` from `rag`, set `OPENAI_API_KEY`, and drop `depends_on` / `ollama-model` if you want a slimmer stack—or stop the Ollama services and point RAG at the cloud env vars only.

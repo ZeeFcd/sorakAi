@@ -1,76 +1,63 @@
+"""Thin async LLM call site used by the RAG handler.
+
+All provider-specific code lives behind :func:`sorakai.infra.llm.factory.get_chat_model`,
+so swapping or adding providers never touches this file or the handlers.
+Tests can flip ``LLM_PROVIDER`` to ``stub`` (default in tests via ``conftest``)
+or monkeypatch :data:`sorakai.infra.llm.factory.CHAT_MODEL_REGISTRY` to plug in
+a recorder model.
+"""
+
+from __future__ import annotations
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+
 from sorakai.common.config import get_settings
-from sorakai.common.logging_utils import get_logger
+from sorakai.core.logging import get_logger
+from sorakai.infra.llm import get_chat_model
 
-logger = get_logger("sorakai.llm")
+logger = get_logger(__name__)
+
+SYSTEM_PROMPT = (
+    "You answer using the knowledge base context provided in the user's message. "
+    "Earlier messages in this chat are the same conversation - stay consistent with them. "
+    "If the answer is not in the context, say you do not have that information."
+)
 
 
-def ask_llm(
+def _build_messages(
+    question: str,
+    context: str,
+    conversation: list[dict[str, str]] | None,
+) -> list[BaseMessage]:
+    messages: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT)]
+    for turn in conversation or ():
+        role = turn.get("role", "")
+        content = turn.get("content", "")
+        if not content:
+            continue
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
+    user_content = f"Knowledge base context:\n{context}\n\nQuestion:\n{question}"
+    messages.append(HumanMessage(content=user_content))
+    return messages
+
+
+async def ask_llm(
     question: str,
     context: str,
     *,
     conversation: list[dict[str, str]] | None = None,
 ) -> str:
-    """
-    LLM routing (RAG service only):
+    """Ask the currently-configured chat model.
 
-    1. ``OPENAI_BASE_URL`` set → self-hosted OpenAI-compatible API (e.g. Ollama at ``.../v1``).
-    2. Else ``OPENAI_API_KEY`` set → OpenAI cloud.
-    3. Else → deterministic stub (no network).
-
-    ``conversation`` is prior user/assistant turns (OpenAI message shape); the current
-    question is sent in the final user message together with the retrieved KB context.
+    The function is provider-agnostic: it depends on the
+    :class:`~sorakai.infra.llm.base.BaseChatModel` Protocol and the factory.
     """
     settings = get_settings()
-    base_url = settings.openai_base_url
-    api_key = settings.openai_api_key
-    model = settings.openai_chat_model
-
-    if not base_url and not api_key:
-        logger.warning("No OPENAI_BASE_URL or OPENAI_API_KEY; using stub answer")
-        snippet = (context[:120] + "…") if len(context) > 120 else context
-        hist_note = ""
-        if conversation:
-            hist_note = f" [+{len(conversation)} prior msgs]"
-        return f"[stub] Based on context ({snippet!r}), Q: {question!r}{hist_note}"
-
-    try:
-        from openai import OpenAI
-
-        if base_url:
-            key = api_key or "ollama"
-            client = OpenAI(api_key=key, base_url=base_url.rstrip("/"))
-            logger.info("LLM via self-hosted endpoint model=%s", model)
-        else:
-            assert api_key is not None
-            client = OpenAI(api_key=api_key)
-            logger.info("LLM via OpenAI cloud model=%s", model)
-
-        system = (
-            "You answer using the knowledge base context provided in the user's message. "
-            "Earlier messages in this chat are the same conversation—stay consistent with them. "
-            "If the answer is not in the context, say you do not have that information."
-        )
-        messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-        if conversation:
-            for m in conversation:
-                role = m.get("role", "")
-                content = m.get("content", "")
-                if role in ("user", "assistant") and content:
-                    messages.append({"role": role, "content": content})
-        messages.append(
-            {
-                "role": "user",
-                "content": f"Knowledge base context:\n{context}\n\nQuestion:\n{question}",
-            }
-        )
-
-        resp = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=512,
-            temperature=0.2,
-        )
-        return (resp.choices[0].message.content or "").strip()
-    except Exception as e:
-        logger.exception("LLM call failed")
-        return f"[error] LLM failed: {e}"
+    model = get_chat_model(settings)
+    messages = _build_messages(question, context, conversation)
+    logger.info("LLM call: provider=%s messages=%d", settings.llm_provider, len(messages))
+    response = await model.ainvoke(messages)
+    return str(response.content).strip()

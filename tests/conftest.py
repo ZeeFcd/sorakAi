@@ -20,12 +20,18 @@ T = TypeVar("T")
 
 
 @pytest.fixture(autouse=True)
-def _clear_settings_cache() -> Iterator[None]:
-    """Force ``get_settings()`` to re-read env between tests.
+def _isolated_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Force ``get_settings()`` to re-read env between tests and pin offline providers.
 
-    Settings are ``@lru_cache``d so ``monkeypatch.setenv`` would otherwise
-    have no effect after the first call in the process.
+    - ``Settings`` is ``@lru_cache``d, so without clearing the cache
+      ``monkeypatch.setenv`` would silently no-op after the first call.
+    - We pin ``LLM_PROVIDER=stub`` and ``EMBEDDING_PROVIDER=char`` so the suite
+      runs fully offline regardless of whether Ollama happens to be reachable.
+      Tests that exercise a different provider opt in by re-setting these
+      vars *before* depending on a settings/store/chat fixture.
     """
+    monkeypatch.setenv("LLM_PROVIDER", "stub")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "char")
     get_settings.cache_clear()
     try:
         yield

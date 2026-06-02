@@ -29,16 +29,42 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
     store = create_store(settings.redis_url)
-    chat = create_chat_store(settings.redis_url, ttl_seconds=settings.chat_history_ttl_seconds)
+    chat = create_chat_store(
+        settings.redis_url,
+        ttl_seconds=settings.chat_history_ttl_seconds,
+        max_messages=settings.chat_history_max_messages,
+    )
     app.state.store = store
     app.state.chat_store = chat
-    logger.info("RAG service started (redis=%s)", bool(settings.redis_url))
+    logger.info(
+        "RAG service started (redis=%s, llm_provider=%s, embedding_provider=%s)",
+        bool(settings.redis_url),
+        settings.llm_provider,
+        settings.embedding_provider,
+    )
     yield
     if isinstance(store, RedisKnowledgeStore):
         await store.aclose()
     if isinstance(chat, RedisChatHistoryStore):
         await chat.aclose()
     logger.info("RAG service shutdown")
+
+
+def _install_cors(app: FastAPI) -> None:
+    """Install the CORS middleware.
+
+    Browsers reject ``Access-Control-Allow-Origin: *`` together with
+    ``Access-Control-Allow-Credentials: true``, so we never combine them.
+    """
+    origins = get_settings().cors_origins
+    allow_credentials = "*" not in origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 def create_app() -> FastAPI:
@@ -49,13 +75,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    _install_cors(app)
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
@@ -113,7 +133,7 @@ def create_app() -> FastAPI:
         if sid:
             prior = await chat_store.get_messages(sid)
 
-        answer = ask_llm(body.question, context, conversation=prior or None)
+        answer = await ask_llm(body.question, context, conversation=prior or None)
 
         if sid:
             await chat_store.append_pair(sid, body.question, answer)

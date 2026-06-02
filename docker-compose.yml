@@ -76,7 +76,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       MLFLOW_TRACKING_URI: http://mlflow:5000
       EMBEDDING_PROVIDER: ollama
-      OLLAMA_EMBED_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
     ports:
       - "8001:8001"
@@ -97,13 +97,12 @@ services:
     environment:
       PORT: "8002"
       REDIS_URL: redis://redis:6379/0
-      # Self-hosted LLM (Ollama OpenAI-compatible API)
-      OPENAI_BASE_URL: http://ollama:11434/v1
-      OPENAI_API_KEY: ollama
-      OPENAI_CHAT_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      # Fully local: Ollama for both chat and embeddings (no cloud providers).
+      LLM_PROVIDER: ollama
       EMBEDDING_PROVIDER: ollama
-      OLLAMA_EMBED_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_CHAT_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
     ports:
       - "8002:8002"

@@ -58,11 +58,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Inside-function imports that will be removed in later waves of the overhaul plan.
 # Each entry below MUST disappear when its wave lands.
-"sorakai/common/chat_history.py"     = ["PLC0415"]                    # removed in Wave 1
-"sorakai/common/llm.py"              = ["PLC0415"]                    # removed in Wave 1
-"sorakai/common/embedding.py"        = ["PLC0415", "ASYNC109"]        # removed in Wave 1 / Wave 2 (timeout param)
 "sorakai/common/store.py"            = ["PLC0415", "B905"]            # removed in Wave 4 (zip strict=)
-"sorakai/common/mlflow_tracking.py"  = ["PLC0415"]                    # removed in Wave 8
+"sorakai/common/mlflow_tracking.py"  = ["PLC0415"]                    # removed in Wave 8 (deferred mlflow import is intentional - optional dep)
 # Test files use `pytest.importorskip` style and module-level fixtures; PLC0415 is too aggressive there.
 "tests/**" = ["PLC0415"]
 
@@ -92,11 +89,7 @@ exclude = ["openapi/", "build/", ".venv/"]
 # Legacy modules: typed as best-effort, will be brought to strict in their waves.
 # Each error code disabled here is paid back by the wave that rewrites the file.
 module = [
-  "sorakai.common.chat_history",      # tightened in Wave 1
-  "sorakai.common.config",            # tightened in Wave 1
-  "sorakai.common.embedding",         # tightened in Wave 1 + Wave 2
   "sorakai.common.ingest",            # tightened in Wave 3
-  "sorakai.common.llm",               # tightened in Wave 1
   "sorakai.common.logging_utils",     # tightened in Wave 8
   "sorakai.common.mlflow_tracking",   # tightened in Wave 8
   "sorakai.common.openapi_bundle",    # tightened in Wave 11
@@ -126,10 +119,11 @@ disable_error_code = ["attr-defined", "arg-type", "no-untyped-def"]
 module = [
   "fakeredis",
   "fakeredis.*",
+  "langchain_core.*",
+  "langchain_ollama",
+  "langchain_ollama.*",
   "mlflow",
   "mlflow.*",
-  "openai",
-  "openai.*",
   "respx",
   "respx.*",
 ]

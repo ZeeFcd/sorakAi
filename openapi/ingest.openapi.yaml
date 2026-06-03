@@ -74,14 +74,46 @@ components:
           minimum: 50.0
           title: Chunk Size
           default: 500
+        chunk_overlap:
+          type: integer
+          maximum: 2000.0
+          minimum: 0.0
+          title: Chunk Overlap
+          description: Number of characters each chunk overlaps with its neighbour.
+            Must be strictly less than chunk_size; the splitter enforces that.
+          default: 50
+        mime_type:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Mime Type
+          description: Optional MIME type hint (e.g. text/x-python, text/markdown).
+            When omitted the splitter falls back to detecting the language from the
+            filename suffix and finally to a plain recursive character split.
+        document_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Document Id
+          description: Stable id for this document; generated if omitted.
+        replace_kb:
+          type: boolean
+          title: Replace Kb
+          description: If true, remove all existing knowledge before adding this document.
+          default: false
       type: object
       required:
       - filename
       - content
       title: DocumentIngestRequest
       example:
+        chunk_overlap: 50
+        chunk_size: 500
         content: "def foo():\n    return 42\n"
         filename: main.py
+        mime_type: text/x-python
     DocumentIngestResponse:
       properties:
         message:
@@ -93,11 +125,16 @@ components:
         filename:
           type: string
           title: Filename
+        document_id:
+          type: string
+          title: Document Id
+          description: Id of the stored document (use for traceability)
       type: object
       required:
       - message
       - num_chunks
       - filename
+      - document_id
       title: DocumentIngestResponse
     HTTPValidationError:
       properties:

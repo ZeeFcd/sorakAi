@@ -3,7 +3,9 @@
 **Redis**
 
 - **KB chunks**: ``sorakai:kb:chunks`` — Redis *HASH*: field ``ck:<uuid>`` → JSON
-  ``{text, embedding, doc_id, filename, chunk_index}``. Appends use **HSET** only.
+  ``{text, embedding, doc_id, filename, chunk_index, chunk_total, mime}``.
+  Appends use **HSET** only; Wave 3 added ``chunk_total`` + ``mime`` (older
+  entries without them stay readable thanks to the tolerant read path).
 
 **Chat history** (RAG) uses separate keys — see ``chat_history.py``.
 
@@ -28,6 +30,8 @@ class ChunkEntry(TypedDict):
     doc_id: str
     filename: str
     chunk_index: int
+    chunk_total: int
+    mime: str | None
 
 
 def _entries_to_flat(entries: list[ChunkEntry]) -> tuple[list[str], list[np.ndarray]]:
@@ -50,8 +54,11 @@ class KnowledgeStore(ABC):
         filename: str,
         chunks: list[str],
         embeddings: list[np.ndarray],
+        *,
+        mime_type: str | None = None,
     ) -> None:
         entries = await self._read_entries()
+        total = len(chunks)
         for i, (text, emb) in enumerate(zip(chunks, embeddings)):
             entries.append(
                 {
@@ -60,16 +67,24 @@ class KnowledgeStore(ABC):
                     "doc_id": doc_id,
                     "filename": filename,
                     "chunk_index": i,
+                    "chunk_total": total,
+                    "mime": mime_type,
                 }
             )
         await self._write_entries(entries)
 
     async def replace_entire_kb(
-        self, chunks: list[str], embeddings: list[np.ndarray], filename: str = "inline"
+        self,
+        chunks: list[str],
+        embeddings: list[np.ndarray],
+        filename: str = "inline",
+        *,
+        mime_type: str | None = None,
     ) -> None:
         """Replace the whole KB with a single synthetic document."""
         doc_id = str(uuid.uuid4())
         new_entries: list[ChunkEntry] = []
+        total = len(chunks)
         for i, (text, emb) in enumerate(zip(chunks, embeddings)):
             new_entries.append(
                 {
@@ -78,6 +93,8 @@ class KnowledgeStore(ABC):
                     "doc_id": doc_id,
                     "filename": filename,
                     "chunk_index": i,
+                    "chunk_total": total,
+                    "mime": mime_type,
                 }
             )
         await self._write_entries(new_entries)
@@ -139,6 +156,9 @@ class RedisKnowledgeStore(KnowledgeStore):
         entries: list[ChunkEntry] = []
         for v in raw_map.values():
             d = json.loads(v)
+            # ``chunk_total`` and ``mime`` were added in Wave 3; fall back so
+            # KBs ingested by earlier waves stay readable. A -1 total signals
+            # "unknown" to downstream consumers.
             entries.append(
                 {
                     "text": d["text"],
@@ -146,6 +166,8 @@ class RedisKnowledgeStore(KnowledgeStore):
                     "doc_id": d["doc_id"],
                     "filename": d["filename"],
                     "chunk_index": int(d["chunk_index"]),
+                    "chunk_total": int(d.get("chunk_total", -1)),
+                    "mime": d.get("mime"),
                 }
             )
         entries.sort(key=lambda e: (e["doc_id"], e["chunk_index"]))
@@ -164,10 +186,13 @@ class RedisKnowledgeStore(KnowledgeStore):
         filename: str,
         chunks: list[str],
         embeddings: list[np.ndarray],
+        *,
+        mime_type: str | None = None,
     ) -> None:
         if not chunks:
             return
         mapping: dict[str, str] = {}
+        total = len(chunks)
         for i, (text, emb) in enumerate(zip(chunks, embeddings)):
             entry: ChunkEntry = {
                 "text": text,
@@ -175,6 +200,8 @@ class RedisKnowledgeStore(KnowledgeStore):
                 "doc_id": doc_id,
                 "filename": filename,
                 "chunk_index": i,
+                "chunk_total": total,
+                "mime": mime_type,
             }
             mapping[f"ck:{uuid.uuid4()}"] = _entry_to_json(entry)
         await self._redis.hset(KB_CHUNKS_HASH_KEY, mapping=mapping)

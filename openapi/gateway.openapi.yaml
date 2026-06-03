@@ -115,14 +115,46 @@ components:
           minimum: 50.0
           title: Chunk Size
           default: 500
+        chunk_overlap:
+          type: integer
+          maximum: 2000.0
+          minimum: 0.0
+          title: Chunk Overlap
+          description: Number of characters each chunk overlaps with its neighbour.
+            Must be strictly less than chunk_size; the splitter enforces that.
+          default: 50
+        mime_type:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Mime Type
+          description: Optional MIME type hint (e.g. text/x-python, text/markdown).
+            When omitted the splitter falls back to detecting the language from the
+            filename suffix and finally to a plain recursive character split.
+        document_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Document Id
+          description: Stable id for this document; generated if omitted.
+        replace_kb:
+          type: boolean
+          title: Replace Kb
+          description: If true, remove all existing knowledge before adding this document.
+          default: false
       type: object
       required:
       - filename
       - content
       title: DocumentIngestRequest
       example:
+        chunk_overlap: 50
+        chunk_size: 500
         content: "def foo():\n    return 42\n"
         filename: main.py
+        mime_type: text/x-python
     DocumentIngestResponse:
       properties:
         message:
@@ -134,11 +166,16 @@ components:
         filename:
           type: string
           title: Filename
+        document_id:
+          type: string
+          title: Document Id
+          description: Id of the stored document (use for traceability)
       type: object
       required:
       - message
       - num_chunks
       - filename
+      - document_id
       title: DocumentIngestResponse
     HTTPValidationError:
       properties:
@@ -169,12 +206,34 @@ components:
           maxLength: 4000
           minLength: 1
           title: Question
+        session_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Session Id
+          description: If set, prior turns in this session are sent to the model and
+            updated after each reply.
+        top_k:
+          type: integer
+          maximum: 20.0
+          minimum: 1.0
+          title: Top K
+          description: Number of KB chunks to merge into context
+          default: 5
+        use_chat_history:
+          type: boolean
+          title: Use Chat History
+          description: If false, session_id is ignored (stateless turn).
+          default: true
       type: object
       required:
       - question
       title: QueryRequest
       example:
         question: What does foo return?
+        session_id: user-42
+        top_k: 5
     QueryResponse:
       properties:
         answer:
@@ -183,7 +242,18 @@ components:
         context_preview:
           type: string
           title: Context Preview
-          description: Short preview of retrieved chunk
+          description: Short preview of merged retrieval context
+        sources_used:
+          type: integer
+          title: Sources Used
+          description: How many KB chunks were merged into context
+          default: 0
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+          description: Echo when conversation state was used
       type: object
       required:
       - answer

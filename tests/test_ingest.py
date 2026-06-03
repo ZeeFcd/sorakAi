@@ -15,9 +15,14 @@ def test_ingest_document():
     with TestClient(app) as client:
         r = client.post(
             "/v1/documents",
-            json={"filename": "x.py", "content": "def foo():\n    return 42\n" * 5, "chunk_size": 50},
+            json={
+                "filename": "x.py",
+                "content": "def foo():\n    return 42\n" * 5,
+                "chunk_size": 100,
+                "chunk_overlap": 0,
+            },
         )
-        assert r.status_code == 201
+        assert r.status_code == 201, r.text
         data = r.json()
         assert data["num_chunks"] >= 1
         assert "x.py" in data["message"]

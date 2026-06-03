@@ -156,10 +156,13 @@ langchain-core==1.4.0
     # via
     #   -r requirements.in
     #   langchain-ollama
+    #   langchain-text-splitters
 langchain-ollama==1.1.0
     # via -r requirements.in
 langchain-protocol==0.0.16
     # via langchain-core
+langchain-text-splitters==1.1.2
+    # via -r requirements.in
 langsmith==0.8.8
     # via langchain-core
 librt==0.11.0

@@ -142,6 +142,59 @@ and only after the chunks land does the dim-guard meta get rewritten. If the
 meta swap fails for any reason, the next request gets a clean 409 instead of
 the silent corruption the meta-first ordering used to produce.
 
+### Vector store (Wave 5)
+
+`sorakai/infra/vector_store/` exposes the same factory pattern as the LLM /
+embeddings layers: callers depend on the `VectorStore` Protocol and pick a
+backend with `VECTOR_STORE`.
+
+| `VECTOR_STORE` | Backend | Notes |
+|----------------|---------|-------|
+| `memory` *(test default)* | `KnowledgeStoreVectorStore(InMemoryKnowledgeStore())` | Single-process; resets on restart. |
+| `redis` *(prod default)* | `KnowledgeStoreVectorStore(RedisKnowledgeStore(REDIS_URL))` | Same Wave 4 hash layout (`ck:<doc_id>:<chunk_index>`). |
+| `qdrant` | `QdrantVectorStore` | Real ANN backend; collection per env (`QDRANT_COLLECTION`, default `sorakai_kb`), cosine distance, payload carries the Wave 3 chunk metadata. |
+
+The Protocol surface is intentionally small:
+
+```python
+class VectorStore(Protocol):
+    async def upsert(self, docs: list[VectorDoc]) -> None: ...
+    async def delete_doc(self, doc_id: str) -> int: ...
+    async def list_docs(self) -> list[DocSummary]: ...
+    async def search(self, query_vec, k, filters=None) -> list[Hit]: ...
+    async def ping(self) -> bool: ...
+    async def aclose(self) -> None: ...
+```
+
+Re-ingesting the same `doc_id` overwrites cleanly on every backend (Wave 4
+contract carried into the Protocol). For Qdrant we drop any existing points
+matching `doc_id` before upserting the new batch so a smaller re-ingest
+doesn't orphan tail chunks.
+
+#### Adding a new vector store
+
+1. Drop an adapter file under `sorakai/infra/vector_store/<name>.py` that
+   satisfies the Protocol.
+2. Add the backend literal to `VectorStoreBackend` in `sorakai/common/config.py`.
+3. Register a builder in `sorakai/infra/vector_store/factory.py`:
+   ```python
+   VECTOR_STORE_REGISTRY["milvus"] = _build_milvus
+   ```
+4. Add it to the `vstore` matrix in `tests/test_vector_store.py` — the
+   behavioural matrix runs every test against every backend automatically.
+
+#### Running Qdrant locally
+
+```bash
+docker compose up -d qdrant
+# then point ingest + rag at it:
+VECTOR_STORE=qdrant QDRANT_URL=http://127.0.0.1:6333 make dev
+```
+
+In tests the `qdrant-client` library supports the in-process `":memory:"`
+transport (`AsyncQdrantClient(":memory:")`) so the suite exercises the real
+Qdrant code path without needing a running server.
+
 ### Storage (Redis, Wave 4 layout)
 
 Chunks are stored under a single hash `sorakai:kb:chunks`. Each field is named

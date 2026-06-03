@@ -22,6 +22,14 @@ asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-q --tb=short"
+# Wave 6: ``RunnableWithMessageHistory`` is marked as deprecated in
+# ``langchain-core`` 1.x in favour of LangGraph's built-in persistence; we
+# replace it in Wave 7's ``agent_graph`` and silence the noise until then so
+# the suite output stays signal-only.
+filterwarnings = [
+  "ignore:RunnableWithMessageHistory is deprecated:DeprecationWarning",
+  "ignore:RunnableWithMessageHistory is deprecated:Warning",
+]
 
 [tool.coverage.run]
 source = ["sorakai"]
@@ -94,7 +102,6 @@ module = [
   "sorakai.common.openapi_bundle",    # tightened in Wave 11
   "sorakai.common.store",             # narrowed in Wave 4; final tighten in Wave 5
   "sorakai.gateway.app",              # tightened in Wave 10
-  "sorakai.rag.app",                  # tightened in Wave 6
 ]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
@@ -120,6 +127,8 @@ module = [
   "langchain_ollama.*",
   "mlflow",
   "mlflow.*",
+  "rank_bm25",
+  "rank_bm25.*",
   "respx",
   "respx.*",
 ]

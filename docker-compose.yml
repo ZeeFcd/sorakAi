@@ -28,8 +28,9 @@ services:
     ports:
       - "6379:6379"
 
-  # Wave 5: Qdrant vector DB. Default backend is still Redis (set VECTOR_STORE=qdrant
-  # on the ingest + rag services to flip). Volume keeps the collection across restarts.
+  # Wave 5/6: Qdrant vector DB. Wave 6 flips ingest + rag to ``VECTOR_STORE=qdrant``
+  # by default; override per-service via env if you'd rather stay on the
+  # Redis-backed in-process KnowledgeStore. Volume keeps the collection across restarts.
   qdrant:
     image: qdrant/qdrant:v1.18.0
     ports:
@@ -101,12 +102,17 @@ services:
       EMBEDDING_PROVIDER: ollama
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      VECTOR_STORE: ${VECTOR_STORE:-qdrant}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-sorakai_kb}
     ports:
       - "8001:8001"
     depends_on:
       redis:
         condition: service_started
       mlflow:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
       ollama-model:
         condition: service_completed_successfully
@@ -127,12 +133,18 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_CHAT_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      VECTOR_STORE: ${VECTOR_STORE:-qdrant}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-sorakai_kb}
+      HYBRID_RETRIEVER_ENABLED: ${HYBRID_RETRIEVER_ENABLED:-true}
     ports:
       - "8002:8002"
     depends_on:
       redis:
         condition: service_started
       mlflow:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
       ollama-model:
         condition: service_completed_successfully

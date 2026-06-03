@@ -143,6 +143,53 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- RAG chain (Wave 6) ----------------------------------------------
+    rag_top_k: int = Field(
+        default=5,
+        alias="RAG_TOP_K",
+        ge=1,
+        le=20,
+        description="Number of retrieved chunks fed into the LCEL chain's context.",
+    )
+    hybrid_retriever_enabled: bool = Field(
+        default=True,
+        alias="HYBRID_RETRIEVER_ENABLED",
+        description=(
+            "Fuse BM25 (lexical) with the vector retriever via Reciprocal Rank Fusion. "
+            "Falls back to vector-only when the corpus snapshot is empty."
+        ),
+    )
+    hybrid_bm25_weight: float = Field(
+        default=0.4,
+        alias="HYBRID_BM25_WEIGHT",
+        ge=0.0,
+        le=1.0,
+        description="RRF weight applied to the BM25 ranking.",
+    )
+    hybrid_vector_weight: float = Field(
+        default=0.6,
+        alias="HYBRID_VECTOR_WEIGHT",
+        ge=0.0,
+        le=1.0,
+        description="RRF weight applied to the vector ranking.",
+    )
+    rerank_top_n: int = Field(
+        default=20,
+        alias="RERANK_TOP_N",
+        ge=1,
+        le=200,
+        description="Cap on the fused list size handed to the (optional) reranker.",
+    )
+    reranker_enabled: bool = Field(
+        default=False,
+        alias="RERANKER_ENABLED",
+        description=(
+            "When true the chain calls a cross-encoder reranker (e.g. bge-reranker-base) "
+            "between fusion and prompting. Off by default to keep local-only fast; the "
+            "actual reranker model loader lands in a future wave."
+        ),
+    )
+
     # --- MLflow ----------------------------------------------------------
     mlflow_tracking_uri: str | None = Field(
         default=None,

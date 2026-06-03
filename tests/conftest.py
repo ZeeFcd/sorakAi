@@ -55,7 +55,7 @@ def run_async() -> Callable[[Awaitable[T]], T]:
 
 
 @pytest.fixture
-def seed_kb(run_async: Callable[[Awaitable[None]], None]) -> Callable[..., list[np.ndarray]]:
+def seed_kb() -> Callable[..., list[np.ndarray]]:
     """Seed a FastAPI app's KB consistently using the configured embedding provider.
 
     This is the Wave 2 replacement for tests that used to hand-craft
@@ -90,6 +90,6 @@ def seed_kb(run_async: Callable[[Awaitable[None]], None]) -> Callable[..., list[
             )
             return vectors
 
-        return run_async(_run())
+        return asyncio.run(_run())
 
     return _seeder

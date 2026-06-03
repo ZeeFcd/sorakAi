@@ -28,6 +28,13 @@ langchain-text-splitters>=0.3.0
 # sorakai/chains/retriever.py (no langchain-community dependency).
 rank-bm25>=0.2.2
 
+# --- Agent graph (Wave 7) ---
+# langgraph supplies the StateGraph + checkpointer used by
+# sorakai/chains/agent_graph.py for the route/retrieve/grade/rewrite/
+# generate/critique loop driving POST /v1/agent. Pinned >=0.6 because the
+# 0.6 release stabilised the langchain-core 1.x message + tool interfaces.
+langgraph>=0.6.0
+
 # --- Storage ---
 redis>=5.0.0
 

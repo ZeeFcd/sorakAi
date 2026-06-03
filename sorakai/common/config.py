@@ -190,6 +190,26 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Agent graph (Wave 7) --------------------------------------------
+    agent_max_steps: int = Field(
+        default=4,
+        alias="AGENT_MAX_STEPS",
+        ge=1,
+        le=20,
+        description=(
+            "Hard cap on the route -> retrieve -> grade -> rewrite -> generate -> critique loop. "
+            "Once the budget is spent the graph short-circuits to the best answer so far."
+        ),
+    )
+    web_search_enabled: bool = Field(
+        default=False,
+        alias="WEB_SEARCH_ENABLED",
+        description=(
+            "Wave 7 ships a stubbed web_search tool that returns []; flipping this on without "
+            "registering a real provider raises ToolError so misconfiguration fails loudly."
+        ),
+    )
+
     # --- MLflow ----------------------------------------------------------
     mlflow_tracking_uri: str | None = Field(
         default=None,

@@ -62,6 +62,79 @@ def test_gateway_proxy_query(gateway_app):
 
 
 @respx.mock
+def test_gateway_proxy_agent(gateway_app):
+    respx.post("http://rag.test/v1/agent").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "answer": "Pyramids are in Egypt.",
+                "sources_used": 2,
+                "session_id": "user-7",
+                "route": "kb",
+                "steps_used": 1,
+                "trace": ["route", "retrieve", "grade", "generate", "critique"],
+                "tool_calls": [
+                    {
+                        "name": "kb_search",
+                        "input": {"query": "pyramids", "k": 5},
+                        "output_summary": "2 item(s)",
+                        "duration_ms": 12.3,
+                        "error": None,
+                    }
+                ],
+            },
+        )
+    )
+    with TestClient(gateway_app) as client:
+        r = client.post("/api/v1/agent", json={"question": "pyramids", "session_id": "user-7"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["route"] == "kb"
+        assert body["tool_calls"][0]["name"] == "kb_search"
+
+
+@respx.mock
+def test_gateway_proxy_agent_stream_forwards_bytes(gateway_app):
+    """Streaming proxy must pipe upstream SSE frames through untouched."""
+    sse_body = b'event: open\ndata: {"type":"node","node":"route"}\n\nevent: done\ndata: {"type":"done"}\n\n'
+    respx.post("http://rag.test/v1/agent/stream").mock(
+        return_value=httpx.Response(
+            200,
+            content=sse_body,
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    with (
+        TestClient(gateway_app) as client,
+        client.stream("POST", "/api/v1/agent/stream", json={"question": "x"}) as r,
+    ):
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/event-stream")
+        body = b"".join(r.iter_bytes())
+    assert b'data: {"type":"node","node":"route"}' in body
+    assert b"event: done" in body
+
+
+@respx.mock
+def test_gateway_proxy_query_stream_forwards_bytes(gateway_app):
+    sse_body = b'data: {"type":"token","text":"hi"}\n\nevent: done\ndata: {"type":"done"}\n\n'
+    respx.post("http://rag.test/v1/query/stream").mock(
+        return_value=httpx.Response(
+            200,
+            content=sse_body,
+            headers={"content-type": "text/event-stream"},
+        )
+    )
+    with (
+        TestClient(gateway_app) as client,
+        client.stream("POST", "/api/v1/query/stream", json={"question": "?"}) as r,
+    ):
+        assert r.status_code == 200
+        body = b"".join(r.iter_bytes())
+    assert b"event: done" in body
+
+
+@respx.mock
 def test_gateway_proxy_list_documents(gateway_app):
     respx.get("http://ingest.test/v1/documents").mock(
         return_value=httpx.Response(

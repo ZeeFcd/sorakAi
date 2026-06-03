@@ -1,6 +1,160 @@
 {
   "components": {
     "schemas": {
+      "AgentRequest": {
+        "description": "Input to ``POST /v1/agent`` (Wave 7).",
+        "example": {
+          "max_steps": 4,
+          "question": "summarise the README",
+          "session_id": "user-42"
+        },
+        "properties": {
+          "max_steps": {
+            "anyOf": [
+              {
+                "maximum": 20.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-request override of the AGENT_MAX_STEPS budget.",
+            "title": "Max Steps"
+          },
+          "question": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "If set, the agent loads the session's prior turns and persists the new pair.",
+            "title": "Session Id"
+          },
+          "use_chat_history": {
+            "default": true,
+            "description": "If false, session_id is ignored (stateless turn).",
+            "title": "Use Chat History",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "AgentRequest",
+        "type": "object"
+      },
+      "AgentResponse": {
+        "description": "Result of ``POST /v1/agent`` (Wave 7).",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "route": {
+            "description": "Final routing label (``kb`` or ``chitchat``).",
+            "title": "Route",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "sources_used": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Sources Used",
+            "type": "integer"
+          },
+          "steps_used": {
+            "minimum": 0.0,
+            "title": "Steps Used",
+            "type": "integer"
+          },
+          "tool_calls": {
+            "items": {
+              "$ref": "#/components/schemas/AgentToolCallEntry"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          },
+          "trace": {
+            "description": "Ordered list of graph node visits for this invocation.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Trace",
+            "type": "array"
+          }
+        },
+        "required": [
+          "answer",
+          "route",
+          "steps_used"
+        ],
+        "title": "AgentResponse",
+        "type": "object"
+      },
+      "AgentToolCallEntry": {
+        "description": "One tool invocation, suitable for inclusion in :class:`AgentResponse`.",
+        "properties": {
+          "duration_ms": {
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "number"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "input": {
+            "additionalProperties": true,
+            "title": "Input",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "output_summary": {
+            "description": "Tool output reduced to a string for transport (e.g. retriever returns '<n> docs', calc returns the number, web_search returns '<n> hits'). Full payloads stay inside the agent state for tracing.",
+            "title": "Output Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "output_summary",
+          "duration_ms"
+        ],
+        "title": "AgentToolCallEntry",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -236,6 +390,87 @@
         ]
       }
     },
+    "/v1/agent": {
+      "post": {
+        "description": "Run the Wave 7 LangGraph agent.",
+        "operationId": "agent_v1_agent_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
+    "/v1/agent/stream": {
+      "post": {
+        "operationId": "agent_stream_v1_agent_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent Stream",
+        "tags": [
+          "agent"
+        ]
+      }
+    },
     "/v1/query": {
       "post": {
         "operationId": "query_v1_query_post",
@@ -272,6 +507,46 @@
           }
         },
         "summary": "Query",
+        "tags": [
+          "rag"
+        ]
+      }
+    },
+    "/v1/query/stream": {
+      "post": {
+        "description": "SSE streaming variant of ``/v1/query``.\n\nEmits ``token`` events as the LLM produces output, plus a final\n``done`` event with ``{answer, sources_used}``. Errors are sent as\nan ``error`` event so clients can render them inline instead of\nlosing the connection mid-stream.",
+        "operationId": "query_stream_v1_query_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Query Stream",
         "tags": [
           "rag"
         ]

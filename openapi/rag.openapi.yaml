@@ -55,8 +55,201 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /v1/query/stream:
+    post:
+      tags:
+      - rag
+      summary: Query Stream
+      description: 'SSE streaming variant of ``/v1/query``.
+
+
+        Emits ``token`` events as the LLM produces output, plus a final
+
+        ``done`` event with ``{answer, sources_used}``. Errors are sent as
+
+        an ``error`` event so clients can render them inline instead of
+
+        losing the connection mid-stream.'
+      operationId: query_stream_v1_query_stream_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/agent:
+    post:
+      tags:
+      - agent
+      summary: Agent
+      description: Run the Wave 7 LangGraph agent.
+      operationId: agent_v1_agent_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/agent/stream:
+    post:
+      tags:
+      - agent
+      summary: Agent Stream
+      operationId: agent_stream_v1_agent_stream_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AgentRequest:
+      properties:
+        question:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Question
+        session_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Session Id
+          description: If set, the agent loads the session's prior turns and persists
+            the new pair.
+        max_steps:
+          anyOf:
+          - type: integer
+            maximum: 20.0
+            minimum: 1.0
+          - type: 'null'
+          title: Max Steps
+          description: Per-request override of the AGENT_MAX_STEPS budget.
+        use_chat_history:
+          type: boolean
+          title: Use Chat History
+          description: If false, session_id is ignored (stateless turn).
+          default: true
+      type: object
+      required:
+      - question
+      title: AgentRequest
+      description: Input to ``POST /v1/agent`` (Wave 7).
+      example:
+        max_steps: 4
+        question: summarise the README
+        session_id: user-42
+    AgentResponse:
+      properties:
+        answer:
+          type: string
+          title: Answer
+        sources_used:
+          type: integer
+          minimum: 0.0
+          title: Sources Used
+          default: 0
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+        route:
+          type: string
+          title: Route
+          description: Final routing label (``kb`` or ``chitchat``).
+        steps_used:
+          type: integer
+          minimum: 0.0
+          title: Steps Used
+        trace:
+          items:
+            type: string
+          type: array
+          title: Trace
+          description: Ordered list of graph node visits for this invocation.
+        tool_calls:
+          items:
+            $ref: '#/components/schemas/AgentToolCallEntry'
+          type: array
+          title: Tool Calls
+      type: object
+      required:
+      - answer
+      - route
+      - steps_used
+      title: AgentResponse
+      description: Result of ``POST /v1/agent`` (Wave 7).
+    AgentToolCallEntry:
+      properties:
+        name:
+          type: string
+          title: Name
+        input:
+          additionalProperties: true
+          type: object
+          title: Input
+        output_summary:
+          type: string
+          title: Output Summary
+          description: Tool output reduced to a string for transport (e.g. retriever
+            returns '<n> docs', calc returns the number, web_search returns '<n> hits').
+            Full payloads stay inside the agent state for tracing.
+        duration_ms:
+          type: number
+          minimum: 0.0
+          title: Duration Ms
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+      type: object
+      required:
+      - name
+      - output_summary
+      - duration_ms
+      title: AgentToolCallEntry
+      description: One tool invocation, suitable for inclusion in :class:`AgentResponse`.
     HTTPValidationError:
       properties:
         detail:

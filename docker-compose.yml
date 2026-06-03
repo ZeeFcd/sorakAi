@@ -1,6 +1,11 @@
 # Local stack: Redis + Ollama + MLflow + ingest, RAG, gateway.
 # Override model: OLLAMA_MODEL=phi3:mini docker compose up --build
 # MLflow UI: http://127.0.0.1:5000
+# Wave 8 observability:
+#   - Set OTEL_EXPORTER=otlp to ship spans to the optional Jaeger service:
+#       docker compose --profile otel up --build
+#     then open Jaeger UI at http://127.0.0.1:16686.
+#   - Set LOG_FORMAT=console for human-readable logs (default is JSON).
 services:
   mlflow:
     build:
@@ -89,6 +94,24 @@ services:
         echo "Pull finished."
     restart: "no"
 
+  # Wave 8: optional Jaeger collector + UI. Enable with
+  #   docker compose --profile otel up --build
+  # When started, every service auto-points its OTLP exporter at jaeger:4317.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    profiles: ["otel"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC ingest
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:14269/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
   ingest:
     build:
       context: .
@@ -105,6 +128,11 @@ services:
       VECTOR_STORE: ${VECTOR_STORE:-qdrant}
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-sorakai_kb}
+      # Wave 8: ship spans to Jaeger when the otel profile is active.
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
     ports:
       - "8001:8001"
     depends_on:
@@ -137,6 +165,11 @@ services:
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-sorakai_kb}
       HYBRID_RETRIEVER_ENABLED: ${HYBRID_RETRIEVER_ENABLED:-true}
+      # Wave 8 observability.
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
     ports:
       - "8002:8002"
     depends_on:
@@ -159,6 +192,11 @@ services:
       PORT: "8000"
       INGEST_SERVICE_URL: http://ingest:8001
       RAG_SERVICE_URL: http://rag:8002
+      # Wave 8 observability.
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
     ports:
       - "8000:8000"
     depends_on:

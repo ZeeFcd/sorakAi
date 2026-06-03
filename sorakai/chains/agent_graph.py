@@ -61,6 +61,7 @@ from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -372,11 +373,17 @@ async def ainvoke_agent(
     question: str,
     session_id: str | None,
     max_steps: int,
+    callbacks: list[Any] | None = None,
 ) -> AgentState:
     """Run the agent end-to-end, hydrating + persisting chat history.
 
     Returns the final :class:`AgentState` (which the handler reshapes into
     the ``AgentResponse`` schema).
+
+    ``callbacks`` is forwarded into the compiled graph's ``RunnableConfig``
+    so Wave 8's :class:`MlflowChainCallback` (or any other
+    :class:`langchain_core.callbacks.BaseCallbackHandler`) sees every LLM
+    and retrieval call the graph makes.
     """
     chat_store = cast(
         "RedisChatHistoryStore | InMemoryChatHistoryStore",
@@ -405,7 +412,8 @@ async def ainvoke_agent(
     # LangGraph applies the reducer when we update from inside nodes, but the
     # initial value still has to be a list; an empty list is fine.
 
-    result = cast(AgentState, await graph.ainvoke(initial))
+    graph_config: RunnableConfig | None = cast(RunnableConfig, {"callbacks": callbacks}) if callbacks else None
+    result = cast(AgentState, await graph.ainvoke(initial, config=graph_config))
 
     if history_adapter is not None and result.get("answer"):
         await history_adapter.aadd_messages([HumanMessage(content=question), AIMessage(content=result["answer"])])

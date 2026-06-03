@@ -42,6 +42,16 @@ def _isolated_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # decoupled from rank-bm25's tokenisation quirks. Dedicated hybrid tests
     # re-enable it locally.
     monkeypatch.setenv("HYBRID_RETRIEVER_ENABLED", "false")
+    # Wave 8: OpenTelemetry SDK spins up a BatchSpanProcessor worker thread
+    # that writes to stderr; under pytest the captured stream closes before
+    # the worker drains, producing noisy 'I/O on closed file' tracebacks
+    # that have nothing to do with the test logic. Dedicated telemetry
+    # tests opt back in.
+    monkeypatch.setenv("OTEL_ENABLED", "false")
+    monkeypatch.setenv("MLFLOW_CALLBACK_ENABLED", "false")
+    # Wave 8: keep log output dev-friendly during tests; the json/console
+    # renderer choice is exercised in test_logging.py.
+    monkeypatch.setenv("LOG_FORMAT", "console")
     get_settings.cache_clear()
     try:
         yield

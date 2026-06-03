@@ -11,7 +11,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from sorakai import __version__
 from sorakai.common.config import get_settings
-from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
+from sorakai.common.logging_utils import (
+    bind_request_id,
+    clear_request_context,
+    get_logger,
+    new_request_id,
+)
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.schemas import (
     AgentRequest,
@@ -25,6 +30,11 @@ from sorakai.common.schemas import (
     QueryResponse,
     ReadinessResponse,
 )
+from sorakai.common.telemetry import (
+    configure_tracing,
+    instrument_fastapi,
+    instrument_httpx,
+)
 from sorakai.core.logging import configure_logging
 
 logger = get_logger("sorakai.gateway")
@@ -33,7 +43,10 @@ logger = get_logger("sorakai.gateway")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, log_format=settings.log_format)
+    configure_tracing("sorakai-gateway", settings, version=__version__)
+    instrument_fastapi(app)
+    instrument_httpx()
     timeout = httpx.Timeout(settings.request_timeout_seconds)
     app.state.http = httpx.AsyncClient(timeout=timeout)
     logger.info("Gateway started")
@@ -77,12 +90,12 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         rid = request.headers.get("X-Request-ID") or new_request_id()
-        token = request_id_ctx.set(rid)
+        bind_request_id(rid)
         start = time.perf_counter()
         try:
             response = await call_next(request)
         finally:
-            request_id_ctx.reset(token)
+            clear_request_context()
         response.headers["X-Request-ID"] = rid
         response.headers["X-Process-Time"] = f"{(time.perf_counter() - start) * 1000:.2f}ms"
         return response

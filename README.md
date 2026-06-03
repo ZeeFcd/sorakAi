@@ -340,6 +340,73 @@ curl -N -X POST http://localhost:8082/api/v1/agent/stream \
   -d '{"question":"where are the pyramids"}'
 ```
 
+### Observability (Wave 8)
+
+Three pillars wired in this wave: **OpenTelemetry tracing**,
+**structured logs** through `structlog`, and a **LangChain MLflow
+callback** that maps one chain / agent invocation onto one MLflow run.
+
+#### OpenTelemetry
+
+- `sorakai/common/telemetry.py` installs a global `TracerProvider` once
+  per service from the FastAPI `lifespan`. `FastAPIInstrumentor` +
+  `HTTPXClientInstrumentor` auto-instrument HTTP server + outbound calls;
+  the handlers wrap chain/agent invocations in manual `span("rag.query")` /
+  `span("agent.run")` blocks for first-class spans.
+- Settings:
+
+| Setting                         | Default            | Effect                                                                                       |
+| ------------------------------- | ------------------ | -------------------------------------------------------------------------------------------- |
+| `OTEL_ENABLED`                  | `true`             | Master switch; `false` makes every span a no-op.                                             |
+| `OTEL_EXPORTER`                 | `console`          | `console` writes spans to stdout; `otlp` ships gRPC to a collector.                          |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`   | _unset_            | Setting this implicitly flips `OTEL_EXPORTER` to `otlp` (default in compose is `http://jaeger:4317`). |
+| `OTEL_SERVICE_NAME`             | per-service name   | Resource `service.name`; override for multi-tenant deployments.                              |
+| `OTEL_SAMPLER_RATIO`            | `1.0`              | Parent-based `TraceIdRatioBased` sampler; lower in prod (e.g. `0.05`).                       |
+
+- Optional Jaeger in `docker-compose.yml` (UI at <http://127.0.0.1:16686>):
+
+```bash
+docker compose --profile otel up --build
+```
+
+#### Structured logs
+
+`sorakai/core/logging.py` configures `structlog` with the stdlib bridge,
+so `logger.info("foo %s", x)` from sorakai code and `uvicorn` /
+`opentelemetry` / `mlflow` stdlib loggers all render identically.
+JSON renderer in containers (`LOG_FORMAT=json`, default), tinted console
+on a TTY (`LOG_FORMAT=console`).
+
+Every log line carries:
+
+- `event`, `level`, `logger`, `timestamp`,
+- `request_id` (bound from the FastAPI middleware via
+  `bind_request_id` / `clear_request_context`),
+- `trace_id` / `span_id` when emitted inside an OTel span (free
+  log <-> trace correlation in Grafana, Loki, etc.).
+
+#### MLflow chain callback
+
+`sorakai/common/mlflow_callback.py:MlflowChainCallback` is a
+`langchain_core.callbacks.BaseCallbackHandler` that observes every LLM,
+retriever, and tool call inside one chain / agent run, then logs the
+aggregate metrics to MLflow on chain end. The `RAG` handler builds one
+callback per request and passes it through `RunnableConfig`:
+
+| Metric                          | What it counts                                                              |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `llm_calls`, `llm_latency_ms_total` | LLM invocations + total wall-clock latency.                              |
+| `llm_call_<N>_latency_ms`           | Per-call latency for the first `MAX_PER_CALL_METRICS` (default 10) calls.|
+| `tokens_total`                      | Sum of `token_usage.total_tokens` when the LLM surfaces it.              |
+| `retrievals`, `docs_retrieved`      | Retriever invocations + total chunks returned.                           |
+| `retrieval_latency_ms_total`        | Aggregate retriever latency.                                             |
+| `tool_calls`, `tool_latency_ms_total` | Tool invocations (agent only).                                         |
+| `answer_len`                        | Length of the final answer string.                                       |
+
+The callback opens an MLflow run on first `on_chain_start`, closes it on
+the matching root `on_chain_end`, and silently no-ops when
+`MLFLOW_TRACKING_URI` is unset or `MLFLOW_CALLBACK_ENABLED=false`.
+
 ## OpenAPI
 
 - **Versioned specs**: `openapi/*.openapi.json` (CI-checked) and optional `*.openapi.yaml` — regenerate with `python scripts/export_openapi.py --yaml --output openapi`.

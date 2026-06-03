@@ -32,11 +32,11 @@ jobs:
 
       - name: Lint (ruff)
         run: |
-          ruff check sorakai tests scripts
-          ruff format --check sorakai tests scripts
+          ruff check sorakai tests scripts ui
+          ruff format --check sorakai tests scripts ui
 
       - name: Typecheck (mypy --strict)
-        run: mypy sorakai tests scripts
+        run: mypy sorakai tests scripts ui
 
       - name: Run tests
         run: pytest --cov=sorakai --cov-report=term

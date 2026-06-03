@@ -132,5 +132,7 @@ module = [
   "rank_bm25.*",
   "respx",
   "respx.*",
+  "streamlit",
+  "streamlit.*",
 ]
 ignore_missing_imports = true

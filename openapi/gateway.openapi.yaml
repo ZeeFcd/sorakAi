@@ -46,12 +46,12 @@ paths:
                   type: string
                 type: object
                 title: Response Root  Get
-  /api/v1/documents:
+  /v1/documents:
     get:
       tags:
       - documents
       summary: Proxy List Documents
-      operationId: proxy_list_documents_api_v1_documents_get
+      operationId: proxy_list_documents_v1_documents_get
       responses:
         '200':
           description: Successful Response
@@ -59,11 +59,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentListResponse'
+      security:
+      - HTTPBearer: []
     post:
       tags:
       - documents
       summary: Proxy Ingest
-      operationId: proxy_ingest_api_v1_documents_post
+      operationId: proxy_ingest_v1_documents_post
       requestBody:
         content:
           application/json:
@@ -83,12 +85,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/documents/{doc_id}:
+      security:
+      - HTTPBearer: []
+  /v1/documents/{doc_id}:
     delete:
       tags:
       - documents
       summary: Proxy Delete Document
-      operationId: proxy_delete_document_api_v1_documents__doc_id__delete
+      operationId: proxy_delete_document_v1_documents__doc_id__delete
+      security:
+      - HTTPBearer: []
       parameters:
       - name: doc_id
         in: path
@@ -109,12 +115,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/query:
+  /v1/query:
     post:
       tags:
       - rag
       summary: Proxy Query
-      operationId: proxy_query_api_v1_query_post
+      operationId: proxy_query_v1_query_post
       requestBody:
         content:
           application/json:
@@ -134,12 +140,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/agent:
+      security:
+      - HTTPBearer: []
+  /v1/agent:
     post:
       tags:
       - agent
       summary: Proxy Agent
-      operationId: proxy_agent_api_v1_agent_post
+      operationId: proxy_agent_v1_agent_post
       requestBody:
         content:
           application/json:
@@ -159,12 +167,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/query/stream:
+      security:
+      - HTTPBearer: []
+  /v1/query/stream:
     post:
       tags:
       - rag
       summary: Proxy Query Stream
-      operationId: proxy_query_stream_api_v1_query_stream_post
+      operationId: proxy_query_stream_v1_query_stream_post
       requestBody:
         content:
           application/json:
@@ -183,12 +193,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-  /api/v1/agent/stream:
+      security:
+      - HTTPBearer: []
+  /v1/agent/stream:
     post:
       tags:
       - agent
       summary: Proxy Agent Stream
-      operationId: proxy_agent_stream_api_v1_agent_stream_post
+      operationId: proxy_agent_stream_v1_agent_stream_post
       requestBody:
         content:
           application/json:
@@ -207,6 +219,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
 components:
   schemas:
     AgentRequest:
@@ -583,6 +597,10 @@ components:
       - msg
       - type
       title: ValidationError
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer
 tags:
 - name: documents
   description: Ingest pipeline
@@ -590,3 +608,5 @@ tags:
   description: Question answering
 - name: ops
   description: Health and readiness
+- name: compat
+  description: Legacy /api/v1 -> /v1 redirects

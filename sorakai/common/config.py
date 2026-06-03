@@ -25,7 +25,12 @@ VectorStoreBackend = Literal["memory", "redis", "qdrant"]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     # --- Project / runtime ------------------------------------------------
     project_name: str = "sorakAi"
@@ -268,6 +273,55 @@ class Settings(BaseSettings):
         default=None,
         alias="MLFLOW_TRACKING_URI",
         description="When set, ingest/RAG log runs to this MLflow tracking server.",
+    )
+
+    # --- Gateway hardening (Wave 10) -------------------------------------
+    gateway_api_key: str | None = Field(
+        default=None,
+        alias="GATEWAY_API_KEY",
+        description=(
+            "When set, the gateway requires ``Authorization: Bearer <key>`` on every "
+            "/v1/* and /api/v1/* request. Unset means open access (the default for "
+            "local dev). Compared in constant time."
+        ),
+    )
+    request_max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        alias="REQUEST_MAX_BYTES",
+        ge=0,
+        description=(
+            "Hard cap on inbound request body size (bytes). Applies to every service "
+            "via sorakai.common.middleware.install_request_size_limit; 0 disables the check."
+        ),
+    )
+    rate_limit_per_minute: int = Field(
+        default=0,
+        alias="RATE_LIMIT_PER_MINUTE",
+        ge=0,
+        description=(
+            "Per-IP rate limit on the gateway's /v1/* routes. 0 disables the limiter; "
+            "anything else enables it (Redis-backed when REDIS_URL is set, else in-memory)."
+        ),
+    )
+    rate_limit_burst: int = Field(
+        default=20,
+        alias="RATE_LIMIT_BURST",
+        ge=1,
+        description=(
+            "Short-window burst allowance on top of rate_limit_per_minute. The limiter "
+            "lets a client spike up to this many calls in quick succession before the "
+            "per-minute budget starts throttling."
+        ),
+    )
+
+    # --- UI (Streamlit, Wave 10) -----------------------------------------
+    ui_gateway_url: str = Field(
+        default="http://127.0.0.1:8000",
+        alias="UI_GATEWAY_URL",
+        description=(
+            "Default base URL the Streamlit chat UI (ui/streamlit_app.py) targets when "
+            "no override is entered in the sidebar."
+        ),
     )
 
 

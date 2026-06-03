@@ -197,11 +197,49 @@ services:
       OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
       LOG_FORMAT: ${LOG_FORMAT:-json}
+      # Wave 10 gateway hardening. Leave GATEWAY_API_KEY blank to keep
+      # the gateway open (the default for local stacks); set it to flip
+      # bearer auth on without rebuilding the image. The rate limiter is
+      # off by default; set RATE_LIMIT_PER_MINUTE>0 and (optionally)
+      # REDIS_URL to share buckets across replicas.
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
+      REDIS_URL: ${GATEWAY_REDIS_URL:-redis://redis:6379/1}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-0}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-20}
+      REQUEST_MAX_BYTES: ${REQUEST_MAX_BYTES:-10485760}
     ports:
       - "8000:8000"
     depends_on:
       - ingest
       - rag
+
+  # Wave 10: optional Streamlit chat UI. Enable with
+  #   docker compose --profile ui up --build
+  # Then open http://127.0.0.1:8501.
+  ui:
+    image: python:3.12-slim
+    profiles: ["ui"]
+    working_dir: /app
+    environment:
+      UI_GATEWAY_URL: ${UI_GATEWAY_URL:-http://gateway:8000}
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./ui:/app/ui:ro
+      - ./requirements-ui.in:/app/requirements-ui.in:ro
+      - ./requirements.in:/app/requirements.in:ro
+    # Install deps once on boot to keep the image cache-light; production
+    # deployments should bake an image from a Dockerfile pinned to
+    # requirements-ui.txt instead.
+    command:
+      - bash
+      - -ceu
+      - |
+        pip install --quiet streamlit>=1.36.0 httpx
+        exec streamlit run ui/streamlit_app.py --server.address 0.0.0.0
+    depends_on:
+      - gateway
 
 volumes:
   ollama_data:

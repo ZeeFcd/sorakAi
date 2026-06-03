@@ -9,12 +9,14 @@ guard, just one layer up.
 from __future__ import annotations
 
 import asyncio
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
+from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.outputs import ChatResult
 
 from sorakai.chains.prompts import RAG_SYSTEM_PROMPT
 from sorakai.chains.rag_chain import (
@@ -37,13 +39,25 @@ class _RecordingFakeChatModel(FakeListChatModel):
     # the instance and we never have a reference back from the test).
     last_messages: ClassVar[list[BaseMessage]] = []
 
-    def _call(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[no-untyped-def]
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
         type(self).last_messages = list(messages)
-        return super()._call(messages, stop=stop, run_manager=run_manager, **kwargs)
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
-    async def _acall(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[no-untyped-def]
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
         type(self).last_messages = list(messages)
-        return await super()._acall(messages, stop=stop, run_manager=run_manager, **kwargs)
+        return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
 
 async def _seed_store(texts: list[tuple[str, str]]) -> KnowledgeStoreVectorStore:
@@ -251,4 +265,6 @@ def test_chain_persistence_survives_event_loop_isolation() -> None:
 
     out = asyncio.run(run())
     assert out["answer"] == "one"
-    assert out["sources_used"] >= 1
+    sources_used = out["sources_used"]
+    assert isinstance(sources_used, int)
+    assert sources_used >= 1

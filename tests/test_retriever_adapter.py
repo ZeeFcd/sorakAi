@@ -231,11 +231,11 @@ async def test_snapshot_corpus_warns_on_unknown_backend(caplog: pytest.LogCaptur
     from sorakai.chains.retriever import snapshot_corpus
 
     class _MysteryStore:
-        async def list_docs(self):  # type: ignore[no-untyped-def]
+        async def list_docs(self) -> list[object]:
             return []
 
     with caplog.at_level("WARNING"):
-        out = await snapshot_corpus(_MysteryStore())  # type: ignore[arg-type]
+        out = await snapshot_corpus(_MysteryStore())
     assert out == []
     assert any("does not implement a corpus scroll" in r.message for r in caplog.records)
 

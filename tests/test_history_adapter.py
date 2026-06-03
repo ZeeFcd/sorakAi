@@ -64,9 +64,9 @@ async def test_aclear_in_memory() -> None:
 async def test_aadd_messages_redis_pipeline_atomic() -> None:
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = RedisChatHistoryStore.__new__(RedisChatHistoryStore)
-    store._redis = fake_redis  # type: ignore[attr-defined]
-    store._ttl = 60  # type: ignore[attr-defined]
-    store._max = 40  # type: ignore[attr-defined]
+    store._redis = fake_redis
+    store._ttl = 60
+    store._max = 40
 
     history = SorakaiChatMessageHistory(store, "sess-redis")
     await history.aadd_messages([HumanMessage(content="q1"), AIMessage(content="a1")])
@@ -82,9 +82,9 @@ async def test_aadd_messages_redis_pipeline_atomic() -> None:
 async def test_max_messages_window_trims_on_overflow() -> None:
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = RedisChatHistoryStore.__new__(RedisChatHistoryStore)
-    store._redis = fake_redis  # type: ignore[attr-defined]
-    store._ttl = 60  # type: ignore[attr-defined]
-    store._max = 4  # type: ignore[attr-defined]
+    store._redis = fake_redis
+    store._ttl = 60
+    store._max = 4
 
     history = SorakaiChatMessageHistory(store, "sess-window")
     for i in range(5):
@@ -121,9 +121,9 @@ async def test_concurrent_appends_dont_lose_messages() -> None:
     adapter must preserve that property when several chains share a store."""
     fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = RedisChatHistoryStore.__new__(RedisChatHistoryStore)
-    store._redis = fake_redis  # type: ignore[attr-defined]
-    store._ttl = 60  # type: ignore[attr-defined]
-    store._max = 100  # type: ignore[attr-defined]
+    store._redis = fake_redis
+    store._ttl = 60
+    store._max = 100
 
     history = SorakaiChatMessageHistory(store, "sess-concurrent")
 

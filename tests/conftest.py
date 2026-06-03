@@ -37,6 +37,7 @@ def _isolated_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """
     monkeypatch.setenv("LLM_PROVIDER", "stub")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "char")
+    monkeypatch.setenv("VECTOR_STORE", "memory")
     get_settings.cache_clear()
     try:
         yield

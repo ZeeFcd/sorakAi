@@ -15,6 +15,7 @@
    ```bash
    kubectl apply -f k8s/namespace.yaml
    kubectl apply -f k8s/redis.yaml
+   kubectl apply -f k8s/qdrant.yaml         # Wave 5: optional, only needed when VECTOR_STORE=qdrant
    kubectl apply -f k8s/mlflow.yaml
    kubectl apply -f k8s/ollama.yaml
    kubectl apply -f k8s/ingest.yaml

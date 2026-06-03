@@ -28,6 +28,29 @@ services:
     ports:
       - "6379:6379"
 
+  # Wave 5: Qdrant vector DB. Default backend is still Redis (set VECTOR_STORE=qdrant
+  # on the ingest + rag services to flip). Volume keeps the collection across restarts.
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    ports:
+      - "6333:6333"  # HTTP/REST
+      - "6334:6334"  # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--spider",
+          "--quiet",
+          "http://127.0.0.1:6333/readyz",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+
   ollama:
     image: ollama/ollama:latest
     ports:
@@ -133,3 +156,4 @@ services:
 volumes:
   ollama_data:
   mlflow_data:
+  qdrant_data:

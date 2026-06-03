@@ -15,6 +15,14 @@ EmbeddingProvider = Literal["char", "ollama"]
 """Concrete embeddings backends registered in
 ``sorakai.infra.embeddings.factory.EMBEDDINGS_REGISTRY``."""
 
+VectorStoreBackend = Literal["memory", "redis", "qdrant"]
+"""Concrete vector-store backends registered in
+``sorakai.infra.vector_store.factory.VECTOR_STORE_REGISTRY``.
+
+- ``memory`` and ``redis`` wrap :mod:`sorakai.common.store` (Wave 4 layout).
+- ``qdrant`` talks to a real Qdrant server (collection per env, cosine,
+  payload-carries-metadata)."""
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -42,6 +50,31 @@ class Settings(BaseSettings):
 
     # --- Storage ----------------------------------------------------------
     redis_url: str | None = Field(default=None, description="redis://host:6379/0 — if unset, in-memory store")
+
+    # --- Vector store (Wave 5; pluggable via sorakai.infra.vector_store.factory) ---
+    vector_store: VectorStoreBackend = Field(
+        default="redis",
+        alias="VECTOR_STORE",
+        description=(
+            "Selects the KB backend. 'memory'/'redis' wrap the Wave 4 KnowledgeStore; "
+            "'qdrant' talks to a real Qdrant server. Tests default to 'memory' via conftest."
+        ),
+    )
+    qdrant_url: str = Field(
+        default="http://127.0.0.1:6333",
+        alias="QDRANT_URL",
+        description=(
+            "Qdrant endpoint URL. The literal ':memory:' starts an in-process Qdrant "
+            "(useful for tests and local-only smoke runs)."
+        ),
+    )
+    qdrant_collection: str = Field(
+        default="sorakai_kb",
+        alias="QDRANT_COLLECTION",
+        min_length=1,
+        max_length=128,
+        description="Qdrant collection name. Created lazily on first ingest with cosine distance.",
+    )
 
     # --- Upstream services (gateway-only) ---------------------------------
     ingest_service_url: str = Field(default="http://127.0.0.1:8001", alias="INGEST_SERVICE_URL")

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -22,8 +22,11 @@ from sorakai.common.logging_utils import get_logger, new_request_id, request_id_
 from sorakai.common.mlflow_tracking import log_params_metrics, mlflow_run
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.schemas import (
+    DocumentDeleteResponse,
     DocumentIngestRequest,
     DocumentIngestResponse,
+    DocumentListResponse,
+    DocumentSummaryResponse,
     HealthResponse,
     ReadinessResponse,
     new_document_id,
@@ -84,7 +87,7 @@ def create_app() -> FastAPI:
     _install_cors(app)
 
     @app.middleware("http")
-    async def request_id_middleware(request: Request, call_next):
+    async def request_id_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         rid = request.headers.get("X-Request-ID") or new_request_id()
         token = request_id_ctx.set(rid)
         start = time.perf_counter()
@@ -148,41 +151,53 @@ def create_app() -> FastAPI:
             model=settings.ollama_embedding_model,
             dim=next(iter(dims)),
         )
-        try:
-            if body.replace_kb:
-                await kb_meta.reset_to(candidate)
-            else:
+        # Append path: pre-flight the meta check BEFORE touching the store so
+        # mismatched ingests never write chunks they'd just have to roll back.
+        if not body.replace_kb:
+            try:
                 await kb_meta.ensure_compatible(candidate)
-        except DimensionMismatchError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "embedding_metadata_mismatch",
-                    "message": str(exc),
-                    "expected": {
-                        "provider": exc.expected_provider,
-                        "model": exc.expected_model,
-                        "dim": exc.expected_dim,
+            except DimensionMismatchError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "embedding_metadata_mismatch",
+                        "message": str(exc),
+                        "expected": {
+                            "provider": exc.expected_provider,
+                            "model": exc.expected_model,
+                            "dim": exc.expected_dim,
+                        },
+                        "actual": {
+                            "provider": exc.actual_provider,
+                            "model": exc.actual_model,
+                            "dim": exc.actual_dim,
+                        },
+                        "hint": "Re-ingest the corpus with the current provider/model, or pass replace_kb=true.",
                     },
-                    "actual": {
-                        "provider": exc.actual_provider,
-                        "model": exc.actual_model,
-                        "dim": exc.actual_dim,
-                    },
-                    "hint": "Re-ingest the corpus with the current provider/model, or pass replace_kb=true.",
-                },
-            ) from exc
+                ) from exc
 
         doc_id = body.document_id or new_document_id()
         if body.replace_kb:
-            await store.clear_all()
-        await store.append_document(
-            doc_id,
-            body.filename,
-            chunks,
-            vectors,
-            mime_type=body.mime_type,
-        )
+            # Wave 4: store write happens BEFORE the meta swap so a meta-write
+            # failure leaves a self-consistent (chunks + stale-meta) state that
+            # the dim guard surfaces as 409 on the next request - never the
+            # silent corruption the meta-first ordering used to produce.
+            await store.replace_kb_with_document(
+                doc_id,
+                body.filename,
+                chunks,
+                vectors,
+                mime_type=body.mime_type,
+            )
+            await kb_meta.reset_to(candidate)
+        else:
+            await store.append_document(
+                doc_id,
+                body.filename,
+                chunks,
+                vectors,
+                mime_type=body.mime_type,
+            )
 
         with mlflow_run("sorakai-ingest", run_name=f"ingest-{body.filename}"):
             log_params_metrics(
@@ -204,6 +219,48 @@ def create_app() -> FastAPI:
             num_chunks=len(chunks),
             filename=body.filename,
             document_id=doc_id,
+        )
+
+    @app.get(
+        "/v1/documents",
+        response_model=DocumentListResponse,
+        tags=["documents"],
+    )
+    async def list_documents(request: Request) -> DocumentListResponse:
+        store: KnowledgeStore = request.app.state.store
+        summaries = await store.list_documents()
+        return DocumentListResponse(
+            documents=[
+                DocumentSummaryResponse(
+                    doc_id=s.doc_id,
+                    filename=s.filename,
+                    chunk_count=s.chunk_count,
+                    mime=s.mime,
+                )
+                for s in summaries
+            ],
+            total=len(summaries),
+        )
+
+    @app.delete(
+        "/v1/documents/{doc_id}",
+        response_model=DocumentDeleteResponse,
+        tags=["documents"],
+    )
+    async def delete_document(doc_id: str, request: Request) -> DocumentDeleteResponse:
+        if not doc_id.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_id must not be empty")
+        store: KnowledgeStore = request.app.state.store
+        removed = await store.delete_document(doc_id)
+        if removed == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No document with doc_id={doc_id!r}",
+            )
+        return DocumentDeleteResponse(
+            doc_id=doc_id,
+            removed_chunks=removed,
+            message=f"Removed {removed} chunks for document {doc_id!r}",
         )
 
     register_bundled_openapi_routes(app, "ingest")

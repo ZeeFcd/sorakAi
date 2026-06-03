@@ -121,12 +121,49 @@ downstream filtering / attribution. Reads tolerate legacy entries that
 predate the `chunk_total` + `mime` fields (Wave 3 onwards) - missing fields
 read as `-1` / `null` respectively.
 
-### Storage (Redis)
+### Document API (Wave 4)
 
-- **Knowledge base** and **chat history** use **different keys** (they are not one blob):
-  - Chunks live in Redis hash **`sorakai:kb:chunks`** (one hash *field* per chunk: embedding + text + `doc_id` / `filename`). New documents are appended with **`HSET`** only.
-  - Sessions use **`sorakai:chat:<session_id>`** (see `sorakai/common/chat_history.py`).
-- **Retrieval** still loads all chunk vectors into the RAG process and runs cosine similarity (fine for small/medium KBs). For **large** corpora or **ANN** search, plug in a **vector database** (Qdrant, Milvus, pgvector, Redis Search with VECTOR, Pinecone, …) and keep Redis for metadata or caching only—details in the module docstring of `sorakai/common/store.py`.
+Beyond `POST /v1/documents`, the ingest service exposes:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/v1/documents` | List every document in the KB with `chunk_count` and `mime`. |
+| `DELETE` | `/v1/documents/{doc_id}` | Drop every chunk for that document; returns the count removed. 404 if unknown. |
+
+The gateway proxies both as `/api/v1/documents` and `/api/v1/documents/{doc_id}`.
+
+Re-ingest semantics: `POST /v1/documents` with an existing `document_id`
+**atomically replaces** that document's chunks (Redis pipeline pairs
+`HDEL ck:<doc_id>:*` with the new `HSET`). No duplicates, no half-written state.
+
+`replace_kb=true` runs the same atomicity contract at the whole-KB level
+(single `MULTI`/`EXEC` of `DEL sorakai:kb:chunks` + `HSET` of the new doc),
+and only after the chunks land does the dim-guard meta get rewritten. If the
+meta swap fails for any reason, the next request gets a clean 409 instead of
+the silent corruption the meta-first ordering used to produce.
+
+### Storage (Redis, Wave 4 layout)
+
+Chunks are stored under a single hash `sorakai:kb:chunks`. Each field is named
+`ck:<doc_id>:<chunk_index>` (Wave 4) so:
+
+- Re-ingesting the same `doc_id` only writes the new fields and `HDEL`s the
+  stale tail (or zero fields if the chunk count grows) — never duplicates.
+- `DELETE /v1/documents/{doc_id}` is a single `HSCAN` + multi-field `HDEL`.
+- Listing is one `HGETALL` plus an in-process group-by.
+- Reads tolerate pre-Wave-4 `ck:<uuid>` keys (and infer `chunk_total` from
+  siblings sharing the same `doc_id`), so live KBs survive an upgrade.
+
+Other Redis keys used by the project:
+
+- `sorakai:kb:meta` — the dim-guard identity hash (`provider`, `model`, `dim`).
+- `sorakai:chat:<session_id>` — per-session chat history (see `sorakai/common/chat_history.py`).
+
+Retrieval still loads all chunk vectors into the RAG process and runs cosine
+similarity (fine for small / medium KBs). For large corpora or ANN search,
+swap the storage backend out via the Wave 5 `VectorStore` Protocol
+(Qdrant / Milvus / pgvector / Redis Search-VECTOR / Pinecone / …) and keep
+Redis as a metadata + cache layer.
 
 ## OpenAPI
 

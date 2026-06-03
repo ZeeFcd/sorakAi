@@ -1,6 +1,31 @@
 {
   "components": {
     "schemas": {
+      "DocumentDeleteResponse": {
+        "description": "Result of ``DELETE /v1/documents/{doc_id}`` (Wave 4).",
+        "properties": {
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "removed_chunks": {
+            "minimum": 0.0,
+            "title": "Removed Chunks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "doc_id",
+          "removed_chunks",
+          "message"
+        ],
+        "title": "DocumentDeleteResponse",
+        "type": "object"
+      },
       "DocumentIngestRequest": {
         "example": {
           "chunk_overlap": 50,
@@ -103,6 +128,65 @@
           "document_id"
         ],
         "title": "DocumentIngestResponse",
+        "type": "object"
+      },
+      "DocumentListResponse": {
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentSummaryResponse"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "total": {
+            "description": "Number of distinct documents in the KB",
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "documents",
+          "total"
+        ],
+        "title": "DocumentListResponse",
+        "type": "object"
+      },
+      "DocumentSummaryResponse": {
+        "description": "One document row in :class:`DocumentListResponse` (Wave 4).",
+        "properties": {
+          "chunk_count": {
+            "minimum": 0.0,
+            "title": "Chunk Count",
+            "type": "integer"
+          },
+          "doc_id": {
+            "title": "Doc Id",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "mime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime"
+          }
+        },
+        "required": [
+          "doc_id",
+          "filename",
+          "chunk_count"
+        ],
+        "title": "DocumentSummaryResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -324,6 +408,25 @@
       }
     },
     "/api/v1/documents": {
+      "get": {
+        "operationId": "proxy_list_documents_api_v1_documents_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Proxy List Documents",
+        "tags": [
+          "documents"
+        ]
+      },
       "post": {
         "operationId": "proxy_ingest_api_v1_documents_post",
         "requestBody": {
@@ -359,6 +462,48 @@
           }
         },
         "summary": "Proxy Ingest",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{doc_id}": {
+      "delete": {
+        "operationId": "proxy_delete_document_api_v1_documents__doc_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "title": "Doc Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Proxy Delete Document",
         "tags": [
           "documents"
         ]

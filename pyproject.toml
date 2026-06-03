@@ -92,9 +92,8 @@ module = [
   "sorakai.common.logging_utils",     # tightened in Wave 8
   "sorakai.common.mlflow_tracking",   # tightened in Wave 8
   "sorakai.common.openapi_bundle",    # tightened in Wave 11
-  "sorakai.common.store",             # tightened in Wave 4 + Wave 5
+  "sorakai.common.store",             # narrowed in Wave 4; final tighten in Wave 5
   "sorakai.gateway.app",              # tightened in Wave 10
-  "sorakai.ingest.app",               # tightened in Wave 4
   "sorakai.rag.app",                  # tightened in Wave 6
 ]
 disallow_untyped_defs = false

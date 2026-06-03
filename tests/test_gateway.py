@@ -62,6 +62,53 @@ def test_gateway_proxy_query(gateway_app):
 
 
 @respx.mock
+def test_gateway_proxy_list_documents(gateway_app):
+    respx.get("http://ingest.test/v1/documents").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "documents": [
+                    {"doc_id": "doc-1", "filename": "a.txt", "chunk_count": 3, "mime": None},
+                    {"doc_id": "doc-2", "filename": "b.md", "chunk_count": 1, "mime": "text/markdown"},
+                ],
+                "total": 2,
+            },
+        )
+    )
+    with TestClient(gateway_app) as client:
+        r = client.get("/api/v1/documents")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 2
+        assert {d["doc_id"] for d in body["documents"]} == {"doc-1", "doc-2"}
+
+
+@respx.mock
+def test_gateway_proxy_delete_document(gateway_app):
+    respx.delete("http://ingest.test/v1/documents/doc-1").mock(
+        return_value=httpx.Response(
+            200,
+            json={"doc_id": "doc-1", "removed_chunks": 3, "message": "Removed 3 chunks for document 'doc-1'"},
+        )
+    )
+    with TestClient(gateway_app) as client:
+        r = client.delete("/api/v1/documents/doc-1")
+        assert r.status_code == 200
+        assert r.json()["removed_chunks"] == 3
+
+
+@respx.mock
+def test_gateway_proxy_delete_propagates_404(gateway_app):
+    respx.delete("http://ingest.test/v1/documents/missing").mock(
+        return_value=httpx.Response(404, json={"detail": "No document with doc_id='missing'"})
+    )
+    with TestClient(gateway_app) as client:
+        r = client.delete("/api/v1/documents/missing")
+        assert r.status_code == 404
+        assert "missing" in r.json()["detail"]
+
+
+@respx.mock
 def test_gateway_ready_upstream_unhealthy(gateway_app):
     respx.get("http://ingest.test/health").mock(return_value=httpx.Response(503))
     respx.get("http://rag.test/health").mock(return_value=httpx.Response(200, json={"status": "ok", "service": "rag"}))

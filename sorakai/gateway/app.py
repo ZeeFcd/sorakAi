@@ -14,8 +14,10 @@ from sorakai.common.config import get_settings
 from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.schemas import (
+    DocumentDeleteResponse,
     DocumentIngestRequest,
     DocumentIngestResponse,
+    DocumentListResponse,
     HealthResponse,
     QueryRequest,
     QueryResponse,
@@ -141,6 +143,44 @@ def create_app() -> FastAPI:
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
         return DocumentIngestResponse.model_validate(r.json())
+
+    @app.get(
+        "/api/v1/documents",
+        response_model=DocumentListResponse,
+        tags=["documents"],
+    )
+    async def proxy_list_documents(request: Request) -> DocumentListResponse:
+        cfg = get_settings()
+        http: httpx.AsyncClient = client(request)
+        url = f"{cfg.ingest_service_url.rstrip('/')}/v1/documents"
+        try:
+            r = await http.get(url)
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"ingest_unreachable: {e}") from e
+        if r.status_code >= 400:
+            raise HTTPException(status_code=r.status_code, detail=r.text)
+        return DocumentListResponse.model_validate(r.json())
+
+    @app.delete(
+        "/api/v1/documents/{doc_id}",
+        response_model=DocumentDeleteResponse,
+        tags=["documents"],
+    )
+    async def proxy_delete_document(doc_id: str, request: Request) -> DocumentDeleteResponse:
+        cfg = get_settings()
+        http: httpx.AsyncClient = client(request)
+        url = f"{cfg.ingest_service_url.rstrip('/')}/v1/documents/{doc_id}"
+        try:
+            r = await http.delete(url)
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"ingest_unreachable: {e}") from e
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("detail", r.text)
+            except Exception:
+                detail = r.text
+            raise HTTPException(status_code=r.status_code, detail=detail)
+        return DocumentDeleteResponse.model_validate(r.json())
 
     @app.post("/api/v1/query", response_model=QueryResponse, tags=["rag"])
     async def proxy_query(body: QueryRequest, request: Request) -> QueryResponse:

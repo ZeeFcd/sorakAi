@@ -17,7 +17,8 @@ TEST_DIR   := tests
 .DEFAULT_GOAL := help
 
 .PHONY: help venv install install-dev install-ui lock lint lint-fix format \
-        typecheck test test-cov openapi openapi-check dev up down clean eval ui
+        typecheck test test-cov openapi openapi-check dev up down clean eval \
+        ui seed dev-up
 
 help:
 	@awk 'BEGIN {FS = ":.*##"; printf "Targets:\n"} \
@@ -73,20 +74,22 @@ openapi: ## Regenerate openapi/*.openapi.{json,yaml} from the live apps
 openapi-check: ## Fail if committed openapi/*.json drifts from the code
 	$(PY) scripts/export_openapi.py --check --output openapi
 
-dev: ## Run all three services with --reload
-	@echo "Start gateway, ingest, rag in three terminals. Example:"
-	@echo "  $(PY) -m uvicorn sorakai.ingest.app:app  --reload --port 8001"
-	@echo "  $(PY) -m uvicorn sorakai.rag.app:app     --reload --port 8002"
-	@echo "  $(PY) -m uvicorn sorakai.gateway.app:app --reload --port 8000"
+dev: ## Bring up the full compose stack, wait for /health, seed sample corpus, fire a sample query
+	PY_BIN=$(PY) scripts/dev_up.sh
 
-up: ## docker compose up --build -d
+dev-up: dev ## Alias for `make dev` (matches scripts/dev_up.sh naming)
+
+up: ## docker compose up --build -d (no seed / wait loop)
 	docker compose up --build -d
 
 down: ## docker compose down -v
 	docker compose down -v
 
+seed: ## Seed the bundled sample corpus into a running gateway
+	$(PY) scripts/seed.py
+
 clean: ## Remove caches and coverage artifacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage coverage.xml htmlcov
 
-eval: ## Placeholder until Wave 9 adds scripts/eval.py
-	@echo "Eval harness lands in Wave 9 of the overhaul plan."
+eval: ## Run the golden Q/A set against the configured chain provider
+	$(PY) scripts/eval.py --target chain

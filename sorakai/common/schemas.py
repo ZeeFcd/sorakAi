@@ -72,6 +72,28 @@ class DocumentIngestResponse(BaseModel):
     document_id: str = Field(description="Id of the stored document (use for traceability)")
 
 
+class DocumentSummaryResponse(BaseModel):
+    """One document row in :class:`DocumentListResponse` (Wave 4)."""
+
+    doc_id: str
+    filename: str
+    chunk_count: int = Field(ge=0)
+    mime: str | None = None
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentSummaryResponse]
+    total: int = Field(ge=0, description="Number of distinct documents in the KB")
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Result of ``DELETE /v1/documents/{doc_id}`` (Wave 4)."""
+
+    doc_id: str
+    removed_chunks: int = Field(ge=0)
+    message: str
+
+
 class QueryRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": {"question": "What does foo return?", "session_id": "user-42", "top_k": 5}}

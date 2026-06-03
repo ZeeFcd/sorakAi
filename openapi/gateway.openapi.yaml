@@ -47,6 +47,18 @@ paths:
                 type: object
                 title: Response Root  Get
   /api/v1/documents:
+    get:
+      tags:
+      - documents
+      summary: Proxy List Documents
+      operationId: proxy_list_documents_api_v1_documents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
     post:
       tags:
       - documents
@@ -65,6 +77,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentIngestResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/documents/{doc_id}:
+    delete:
+      tags:
+      - documents
+      summary: Proxy Delete Document
+      operationId: proxy_delete_document_api_v1_documents__doc_id__delete
+      parameters:
+      - name: doc_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Doc Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDeleteResponse'
         '422':
           description: Validation Error
           content:
@@ -98,6 +136,25 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    DocumentDeleteResponse:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        removed_chunks:
+          type: integer
+          minimum: 0.0
+          title: Removed Chunks
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - doc_id
+      - removed_chunks
+      - message
+      title: DocumentDeleteResponse
+      description: Result of ``DELETE /v1/documents/{doc_id}`` (Wave 4).
     DocumentIngestRequest:
       properties:
         filename:
@@ -177,6 +234,47 @@ components:
       - filename
       - document_id
       title: DocumentIngestResponse
+    DocumentListResponse:
+      properties:
+        documents:
+          items:
+            $ref: '#/components/schemas/DocumentSummaryResponse'
+          type: array
+          title: Documents
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+          description: Number of distinct documents in the KB
+      type: object
+      required:
+      - documents
+      - total
+      title: DocumentListResponse
+    DocumentSummaryResponse:
+      properties:
+        doc_id:
+          type: string
+          title: Doc Id
+        filename:
+          type: string
+          title: Filename
+        chunk_count:
+          type: integer
+          minimum: 0.0
+          title: Chunk Count
+        mime:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Mime
+      type: object
+      required:
+      - doc_id
+      - filename
+      - chunk_count
+      title: DocumentSummaryResponse
+      description: One document row in :class:`DocumentListResponse` (Wave 4).
     HTTPValidationError:
       properties:
         detail:

@@ -1,0 +1,16 @@
+{"id": "pyr-1", "question": "Where are the Pyramids of Giza located?", "expected_substrings": ["Egypt", "Giza"], "expected_substrings_mode": "any", "expected_doc_ids": ["pyramids"], "tags": ["factual"]}
+{"id": "pyr-2", "question": "Who built the Great Pyramid and roughly how tall is it?", "expected_substrings": ["Khufu", "146"], "expected_substrings_mode": "any", "expected_doc_ids": ["pyramids"], "tags": ["factual"]}
+{"id": "eif-1", "question": "Who designed the Eiffel Tower and when was it built?", "expected_substrings": ["Eiffel", "1889"], "expected_substrings_mode": "all", "expected_doc_ids": ["eiffel"], "tags": ["factual"]}
+{"id": "eif-2", "question": "How tall is the Eiffel Tower?", "expected_substrings": ["330"], "expected_substrings_mode": "any", "expected_doc_ids": ["eiffel"], "tags": ["factual"]}
+{"id": "mars-1", "question": "Why is Mars called the Red Planet?", "expected_substrings": ["iron oxide"], "expected_substrings_mode": "any", "expected_doc_ids": ["mars"], "tags": ["factual"]}
+{"id": "mars-2", "question": "What are the names of the moons of Mars?", "expected_substrings": ["Phobos", "Deimos"], "expected_substrings_mode": "all", "expected_doc_ids": ["mars"], "tags": ["factual"]}
+{"id": "mars-3", "question": "How long is a day on Mars compared to Earth?", "expected_substrings": ["24 hours", "37"], "expected_substrings_mode": "any", "expected_doc_ids": ["mars"], "tags": ["factual"]}
+{"id": "py-1", "question": "Who created Python and when was it first released?", "expected_substrings": ["Guido", "1991"], "expected_substrings_mode": "all", "expected_doc_ids": ["python"], "tags": ["factual"]}
+{"id": "py-2", "question": "What is the reference implementation of Python written in?", "expected_substrings": ["CPython", "C"], "expected_substrings_mode": "any", "expected_doc_ids": ["python"], "tags": ["factual"]}
+{"id": "py-3", "question": "When did Python 2 reach end of life?", "expected_substrings": ["2020"], "expected_substrings_mode": "any", "expected_doc_ids": ["python"], "tags": ["factual"]}
+{"id": "git-1", "question": "Who created Git and in what year?", "expected_substrings": ["Torvalds", "2005"], "expected_substrings_mode": "all", "expected_doc_ids": ["git"], "tags": ["factual"]}
+{"id": "git-2", "question": "Name a few hosting services built on top of Git.", "expected_substrings": ["GitHub", "GitLab"], "expected_substrings_mode": "any", "expected_doc_ids": ["git"], "tags": ["factual"]}
+{"id": "git-3", "question": "What command publishes local commits to a remote?", "expected_substrings": ["git push", "push"], "expected_substrings_mode": "any", "expected_doc_ids": ["git"], "tags": ["factual"]}
+{"id": "sorakai-1", "question": "Which vector store does sorakAi use by default?", "expected_substrings": ["Qdrant"], "expected_substrings_mode": "any", "expected_doc_ids": ["sorakai"], "tags": ["project"]}
+{"id": "sorakai-2", "question": "Which retrieval technique fuses BM25 with vector similarity?", "expected_substrings": ["Reciprocal Rank Fusion", "RRF"], "expected_substrings_mode": "any", "expected_doc_ids": ["sorakai"], "tags": ["project"]}
+{"id": "sorakai-3", "question": "Which two streaming endpoints does sorakAi expose?", "expected_substrings": ["/v1/query/stream", "/v1/agent/stream"], "expected_substrings_mode": "all", "expected_doc_ids": ["sorakai"], "tags": ["project"]}

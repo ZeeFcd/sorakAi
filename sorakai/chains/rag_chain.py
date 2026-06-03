@@ -155,6 +155,7 @@ async def build_rag_chain(
     chat_store: RedisChatHistoryStore | InMemoryChatHistoryStore,
     *,
     reranker: Reranker | None = None,
+    llm: BaseChatModel | None = None,
 ) -> tuple[Runnable[dict[str, Any], dict[str, Any]], VectorStoreRetriever | HybridRetriever]:
     """Return ``(chain, retriever)``.
 
@@ -162,8 +163,14 @@ async def build_rag_chain(
     emits ``{"answer": str, "context": str, "sources_used": int}``. Returning
     the retriever too lets the handler reuse it for things like
     ``/v1/explain`` (Wave 10) without rebuilding the BM25 snapshot.
+
+    ``llm`` is an injection point for the Wave 9 eval harness and unit
+    tests (same shape as :func:`sorakai.chains.agent_graph.build_agent_graph`);
+    production callers leave it ``None`` and :func:`get_chat_model` picks
+    the configured provider.
     """
-    llm = get_chat_model(settings)
+    if llm is None:
+        llm = get_chat_model(settings)
     retriever = await _build_retriever(
         settings,
         vector_store,

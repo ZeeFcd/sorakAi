@@ -101,7 +101,6 @@ module = [
   "sorakai.common.mlflow_tracking",   # tightened in Wave 8
   "sorakai.common.openapi_bundle",    # tightened in Wave 11
   "sorakai.common.store",             # narrowed in Wave 4; final tighten in Wave 5
-  "sorakai.gateway.app",              # tightened in Wave 10
 ]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false

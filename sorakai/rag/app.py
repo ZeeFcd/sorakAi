@@ -7,14 +7,16 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from sorakai import __version__
+from sorakai.chains.agent_graph import ainvoke_agent, build_agent_graph
 from sorakai.chains.rag_chain import (
     ainvoke_rag,
     build_rag_chain,
     render_context_preview,
 )
+from sorakai.chains.tools import ToolCall
 from sorakai.common.chat_history import (
     InMemoryChatHistoryStore,
     RedisChatHistoryStore,
@@ -31,7 +33,21 @@ from sorakai.common.kb_meta import (
 from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
 from sorakai.common.mlflow_tracking import log_params_metrics, mlflow_run
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
-from sorakai.common.schemas import HealthResponse, QueryRequest, QueryResponse, ReadinessResponse
+from sorakai.common.schemas import (
+    AgentRequest,
+    AgentResponse,
+    AgentToolCallEntry,
+    HealthResponse,
+    QueryRequest,
+    QueryResponse,
+    ReadinessResponse,
+)
+from sorakai.common.sse import (
+    SSE_KEEPALIVE,
+    format_agent_event,
+    format_chain_event,
+    sse_event,
+)
 from sorakai.common.store import KnowledgeStore, RedisKnowledgeStore, create_store
 from sorakai.core.errors import DimensionMismatchError
 from sorakai.core.logging import configure_logging
@@ -73,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         vector_store = get_vector_store(settings)
 
     chain, retriever = await build_rag_chain(settings, vector_store, chat)
+    agent_graph, agent_tools = build_agent_graph(settings, vector_store, chat)
 
     app.state.store = store
     app.state.chat_store = chat
@@ -80,6 +97,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.vector_store = vector_store
     app.state.rag_chain = chain
     app.state.retriever = retriever
+    app.state.agent_graph = agent_graph
+    app.state.agent_tools = agent_tools
     logger.info(
         "RAG service started (redis=%s, llm_provider=%s, embedding_provider=%s, vector_store=%s)",
         bool(settings.redis_url),
@@ -259,8 +278,167 @@ def create_app() -> FastAPI:
             session_id=sid,
         )
 
+    @app.post("/v1/query/stream", tags=["rag"])
+    async def query_stream(body: QueryRequest, request: Request) -> StreamingResponse:
+        """SSE streaming variant of ``/v1/query``.
+
+        Emits ``token`` events as the LLM produces output, plus a final
+        ``done`` event with ``{answer, sources_used}``. Errors are sent as
+        an ``error`` event so clients can render them inline instead of
+        losing the connection mid-stream.
+        """
+        chain = request.app.state.rag_chain
+        store: KnowledgeStore = request.app.state.store
+        try:
+            sid = validate_session_id(body.session_id) if body.use_chat_history else None
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+        if not await store.list_documents():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No documents in knowledge base")
+
+        payload: dict[str, Any] = {"question": body.question}
+        if sid:
+            payload["session_id"] = sid
+
+        async def _gen() -> AsyncIterator[bytes]:
+            try:
+                async for ev in chain.astream_events(payload, version="v2"):
+                    projected = format_chain_event(ev)
+                    if projected is not None:
+                        yield sse_event(projected).encode("utf-8")
+                yield sse_event({"type": "done"}, event="done").encode("utf-8")
+            except Exception as exc:
+                logger.exception("chain stream failed: %s", exc)
+                yield sse_event({"type": "error", "message": str(exc)}, event="error").encode("utf-8")
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
+    @app.post("/v1/agent", response_model=AgentResponse, tags=["agent"])
+    async def agent(body: AgentRequest, request: Request) -> AgentResponse:
+        """Run the Wave 7 LangGraph agent."""
+        graph = request.app.state.agent_graph
+        store: KnowledgeStore = request.app.state.store
+        kb_meta: KBMetaStore = request.app.state.kb_meta
+        cfg = get_settings()
+        try:
+            sid = validate_session_id(body.session_id) if body.use_chat_history else None
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+        # Same cheap pre-flight as /v1/query so dim mismatches surface
+        # before we spend any LLM tokens on routing.
+        stored_meta = await kb_meta.read()
+        if stored_meta is not None and (stored_meta.provider, stored_meta.model) != (
+            cfg.embedding_provider,
+            cfg.ollama_embedding_model,
+        ):
+            _raise_dim_mismatch(
+                DimensionMismatchError(
+                    expected_provider=stored_meta.provider,
+                    expected_model=stored_meta.model,
+                    expected_dim=stored_meta.dim,
+                    actual_provider=cfg.embedding_provider,
+                    actual_model=cfg.ollama_embedding_model,
+                    actual_dim=stored_meta.dim,
+                )
+            )
+
+        # An empty KB doesn't 404 here: the agent can still chitchat (the
+        # route node may classify as such) - keeping the endpoint useful for
+        # smalltalk and tool-only flows like ``calc``.
+        await store.list_documents()
+
+        max_steps = int(body.max_steps or cfg.agent_max_steps)
+        try:
+            result = await ainvoke_agent(graph, question=body.question, session_id=sid, max_steps=max_steps)
+        except ValueError as e:
+            if "dim" in str(e).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"error": "embedding_dim_mismatch", "message": str(e)},
+                ) from e
+            raise
+
+        tool_calls: list[ToolCall] = list(result.get("tool_calls", []) or [])
+        tool_call_entries = [_summarise_tool_call(tc) for tc in tool_calls]
+
+        return AgentResponse(
+            answer=str(result.get("answer", "")),
+            sources_used=len(result.get("docs", []) or []),
+            session_id=sid,
+            route=str(result.get("route", "kb")),
+            steps_used=int(result.get("step", 0) or 0),
+            trace=list(result.get("trace", []) or []),
+            tool_calls=tool_call_entries,
+        )
+
+    @app.post("/v1/agent/stream", tags=["agent"])
+    async def agent_stream(body: AgentRequest, request: Request) -> StreamingResponse:
+        graph = request.app.state.agent_graph
+        cfg = get_settings()
+        try:
+            sid = validate_session_id(body.session_id) if body.use_chat_history else None
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+        max_steps = int(body.max_steps or cfg.agent_max_steps)
+        initial: dict[str, Any] = {
+            "question": body.question,
+            "query": body.question,
+            "session_id": sid,
+            "history": [],
+            "docs": [],
+            "context": "",
+            "answer": "",
+            "route": "kb",
+            "step": 0,
+            "max_steps": max_steps,
+            "trace": [],
+            "tool_calls": [],
+        }
+
+        async def _gen() -> AsyncIterator[bytes]:
+            yield SSE_KEEPALIVE.encode("utf-8")
+            try:
+                async for chunk in graph.astream(initial):
+                    projected = format_agent_event(chunk)
+                    if projected is not None:
+                        yield sse_event(projected).encode("utf-8")
+                yield sse_event({"type": "done"}, event="done").encode("utf-8")
+            except Exception as exc:
+                logger.exception("agent stream failed: %s", exc)
+                yield sse_event({"type": "error", "message": str(exc)}, event="error").encode("utf-8")
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
     register_bundled_openapi_routes(app, "rag")
     return app
+
+
+def _summarise_tool_call(call: ToolCall) -> AgentToolCallEntry:
+    """Reduce a :class:`ToolCall` to a transport-safe schema row.
+
+    - ``kb_search`` outputs are lists of Documents; we summarise as
+      ``"<n> docs"`` (the actual context is already in the answer).
+    - Anything else gets stringified through ``str(...)`` truncated to a
+      sensible length to keep the response body small.
+    """
+    output = call.output
+    if isinstance(output, list):
+        summary = f"{len(output)} item(s)"
+    elif output is None:
+        summary = ""
+    else:
+        rendered = str(output)
+        summary = rendered if len(rendered) <= 400 else rendered[:400] + "…"
+    return AgentToolCallEntry(
+        name=call.name,
+        input=dict(call.input),
+        output_summary=summary,
+        duration_ms=float(call.duration_ms),
+        error=call.error,
+    )
 
 
 app = create_app()

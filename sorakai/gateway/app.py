@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from sorakai import __version__
 from sorakai.common.config import get_settings
 from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.schemas import (
+    AgentRequest,
+    AgentResponse,
     DocumentDeleteResponse,
     DocumentIngestRequest,
     DocumentIngestResponse,
@@ -73,7 +75,7 @@ def create_app() -> FastAPI:
     _install_cors(app)
 
     @app.middleware("http")
-    async def request_id_middleware(request: Request, call_next):
+    async def request_id_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         rid = request.headers.get("X-Request-ID") or new_request_id()
         token = request_id_ctx.set(rid)
         start = time.perf_counter()
@@ -94,7 +96,8 @@ def create_app() -> FastAPI:
         )
 
     def client(request: Request) -> httpx.AsyncClient:
-        return request.app.state.http
+        http: httpx.AsyncClient = request.app.state.http
+        return http
 
     @app.get("/health", response_model=HealthResponse, tags=["ops"])
     async def health() -> HealthResponse:
@@ -199,8 +202,66 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=r.status_code, detail=detail)
         return QueryResponse.model_validate(r.json())
 
+    @app.post("/api/v1/agent", response_model=AgentResponse, tags=["agent"])
+    async def proxy_agent(body: AgentRequest, request: Request) -> AgentResponse:
+        cfg = get_settings()
+        http: httpx.AsyncClient = client(request)
+        url = f"{cfg.rag_service_url.rstrip('/')}/v1/agent"
+        try:
+            r = await http.post(url, json=body.model_dump())
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=502, detail=f"rag_unreachable: {e}") from e
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("detail", r.text)
+            except Exception:
+                detail = r.text
+            raise HTTPException(status_code=r.status_code, detail=detail)
+        return AgentResponse.model_validate(r.json())
+
+    @app.post("/api/v1/query/stream", tags=["rag"])
+    async def proxy_query_stream(body: QueryRequest, request: Request) -> StreamingResponse:
+        return await _proxy_stream(request, "/v1/query/stream", body.model_dump())
+
+    @app.post("/api/v1/agent/stream", tags=["agent"])
+    async def proxy_agent_stream(body: AgentRequest, request: Request) -> StreamingResponse:
+        return await _proxy_stream(request, "/v1/agent/stream", body.model_dump())
+
     register_bundled_openapi_routes(app, "gateway")
     return app
+
+
+async def _proxy_stream(
+    request: Request,
+    path: str,
+    payload: dict[str, object],
+) -> StreamingResponse:
+    """Forward an SSE request to the RAG service, streaming bytes through.
+
+    The upstream client is opened per-request so the response lifetime is
+    bounded by the iterator; ``app.state.http`` is reserved for the
+    short-lived JSON proxies above.
+    """
+    cfg = get_settings()
+    url = f"{cfg.rag_service_url.rstrip('/')}{path}"
+
+    async def _gen() -> AsyncIterator[bytes]:
+        timeout = httpx.Timeout(cfg.request_timeout_seconds, read=None)
+        async with httpx.AsyncClient(timeout=timeout) as upstream:
+            try:
+                async with upstream.stream("POST", url, json=payload) as resp:
+                    if resp.status_code >= 400:
+                        body = await resp.aread()
+                        yield (
+                            f'event: error\ndata: {{"status":{resp.status_code},"detail":{body.decode("utf-8", "replace")!r}}}\n\n'.encode()
+                        )
+                        return
+                    async for chunk in resp.aiter_raw():
+                        yield chunk
+            except httpx.RequestError as e:
+                yield (f'event: error\ndata: {{"error":"rag_unreachable","message":{str(e)!r}}}\n\n').encode()
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 app = create_app()

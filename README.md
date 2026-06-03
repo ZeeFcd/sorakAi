@@ -272,6 +272,74 @@ async path is canonical; sync getters fall back to `asyncio.run` when
 called outside an event loop and raise inside one (so the chain never
 deadlocks itself).
 
+### Agent graph + streaming (Wave 7)
+
+`POST /v1/agent` runs a LangGraph `StateGraph` defined in
+`sorakai/chains/agent_graph.py`. The graph self-corrects (rewrite on a
+weak grade, retry on a bad critique) so the agent is more robust than the
+straight `/v1/query` chain for off-topic or under-specified questions.
+
+```
+start ──▶ route ──┬── kb ──▶ retrieve ──▶ grade ──┬── good ──▶ generate ──▶ critique ──┬── ok ──▶ END
+                  │                                │                                     │
+                  │                                └── weak ──▶ rewrite ─┐               └── retry ──▶ rewrite ─┐
+                  │                                                       │                                      │
+                  │                                                       └──▶ retrieve (loop)                  └──▶ retrieve (loop)
+                  │
+                  └── chitchat ──▶ generate ──▶ critique (skipped) ──▶ END
+```
+
+Three tools live in `sorakai/chains/tools.py` behind a tiny `ToolRegistry`:
+
+| Tool         | Purpose                                                                                |
+| ------------ | -------------------------------------------------------------------------------------- |
+| `kb_search`  | Wraps the Wave 6 retriever; the same retrieval surface the LCEL chain uses.            |
+| `calc`       | AST-walking safe arithmetic evaluator with an exponent cap (no `eval`, no attribute access). |
+| `web_search` | Stubbed off by default (`WEB_SEARCH_ENABLED=false`); enabled-without-provider raises so misconfiguration fails loudly. |
+
+Settings:
+
+| Setting               | Default | Effect                                                                                |
+| --------------------- | ------- | ------------------------------------------------------------------------------------- |
+| `AGENT_MAX_STEPS`     | `4`     | Hard cap on retrieve/rewrite loops; the graph short-circuits to the best answer after.|
+| `WEB_SEARCH_ENABLED`  | `false` | Flip to enable a future real provider behind the stub.                                |
+
+Request shape (`AgentRequest`):
+
+```json
+{ "question": "where are the pyramids", "session_id": "user-7", "max_steps": 4 }
+```
+
+Response shape (`AgentResponse`):
+
+```json
+{
+  "answer": "Pyramids are in Egypt.",
+  "sources_used": 2,
+  "session_id": "user-7",
+  "route": "kb",
+  "steps_used": 2,
+  "trace": ["route", "retrieve", "grade", "generate", "critique"],
+  "tool_calls": [
+    {"name": "kb_search", "input": {"query": "pyramids", "k": 5}, "output_summary": "2 item(s)", "duration_ms": 14.2, "error": null}
+  ]
+}
+```
+
+#### Streaming (SSE)
+
+Both the chain and the agent expose SSE variants — `POST /v1/query/stream`
+and `POST /v1/agent/stream` — that emit one frame per node visit (agent)
+or per LLM token (chain). The framing helper lives in
+`sorakai/common/sse.py`; the gateway proxies stream bytes through
+unmodified so callers can use a single base URL.
+
+```bash
+curl -N -X POST http://localhost:8082/api/v1/agent/stream \
+  -H 'content-type: application/json' \
+  -d '{"question":"where are the pyramids"}'
+```
+
 ## OpenAPI
 
 - **Versioned specs**: `openapi/*.openapi.json` (CI-checked) and optional `*.openapi.yaml` — regenerate with `python scripts/export_openapi.py --yaml --output openapi`.

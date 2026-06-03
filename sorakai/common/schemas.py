@@ -119,6 +119,68 @@ class QueryResponse(BaseModel):
     session_id: str | None = Field(default=None, description="Echo when conversation state was used")
 
 
+class AgentRequest(BaseModel):
+    """Input to ``POST /v1/agent`` (Wave 7)."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "question": "summarise the README",
+                "session_id": "user-42",
+                "max_steps": 4,
+            }
+        }
+    )
+
+    question: str = Field(..., min_length=1, max_length=4000)
+    session_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="If set, the agent loads the session's prior turns and persists the new pair.",
+    )
+    max_steps: int | None = Field(
+        default=None,
+        ge=1,
+        le=20,
+        description="Per-request override of the AGENT_MAX_STEPS budget.",
+    )
+    use_chat_history: bool = Field(
+        default=True,
+        description="If false, session_id is ignored (stateless turn).",
+    )
+
+
+class AgentToolCallEntry(BaseModel):
+    """One tool invocation, suitable for inclusion in :class:`AgentResponse`."""
+
+    name: str
+    input: dict[str, object] = Field(default_factory=dict)
+    output_summary: str = Field(
+        description=(
+            "Tool output reduced to a string for transport (e.g. retriever returns "
+            "'<n> docs', calc returns the number, web_search returns '<n> hits'). "
+            "Full payloads stay inside the agent state for tracing."
+        )
+    )
+    duration_ms: float = Field(ge=0.0)
+    error: str | None = None
+
+
+class AgentResponse(BaseModel):
+    """Result of ``POST /v1/agent`` (Wave 7)."""
+
+    answer: str
+    sources_used: int = Field(default=0, ge=0)
+    session_id: str | None = None
+    route: str = Field(description="Final routing label (``kb`` or ``chitchat``).")
+    steps_used: int = Field(ge=0)
+    trace: list[str] = Field(
+        default_factory=list,
+        description="Ordered list of graph node visits for this invocation.",
+    )
+    tool_calls: list[AgentToolCallEntry] = Field(default_factory=list)
+
+
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str

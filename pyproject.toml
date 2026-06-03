@@ -126,6 +126,8 @@ module = [
   "mlflow.*",
   "opentelemetry.exporter.*",
   "opentelemetry.instrumentation.*",
+  "ragas",
+  "ragas.*",
   "rank_bm25",
   "rank_bm25.*",
   "respx",

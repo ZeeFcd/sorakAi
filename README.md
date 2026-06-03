@@ -407,6 +407,54 @@ The callback opens an MLflow run on first `on_chain_start`, closes it on
 the matching root `on_chain_end`, and silently no-ops when
 `MLFLOW_TRACKING_URI` is unset or `MLFLOW_CALLBACK_ENABLED=false`.
 
+### Evaluation (Wave 9)
+
+The eval harness drives a small golden Q/A set (`tests/eval/golden.jsonl`,
+~16 cases) through either the LCEL chain or the LangGraph agent, scores
+each case with a pure-Python scorer, and prints a compact summary. It is
+the single source of regression truth for prompt + retriever changes.
+
+| Piece                          | Location                                  |
+| ------------------------------ | ----------------------------------------- |
+| Golden Q/A set                 | `tests/eval/golden.jsonl`                 |
+| Corpus (6 markdown files)      | `tests/eval/corpus/*.md`                  |
+| Dataset loader + corpus reader | `sorakai/eval/dataset.py`                 |
+| Scorer (in-tree, no LLM judge) | `sorakai/eval/scorer.py`                  |
+| Runner (chain or agent)        | `sorakai/eval/runner.py`                  |
+| CLI                            | `scripts/eval.py`                         |
+| Optional CI job                | `.github/workflows/ci.yml::eval` (`workflow_dispatch` + `run_eval=true`) |
+
+Each golden row carries `expected_substrings` (matched against the
+answer in either `any` or `all` mode) and `expected_doc_ids` (used by
+`context_precision_at_k`). The scorer also exposes a `pass_rate`
+aggregate — the share of cases whose answer covered the expected
+substrings — which doubles as the CI regression gate via
+`--min-pass-rate`.
+
+```bash
+# Run the chain against the in-tree golden set. Defaults to the
+# providers picked from .env (i.e. Ollama for a local dev box).
+python scripts/eval.py --target chain
+
+# Iterate on a single agent prompt without waiting for the full set.
+python scripts/eval.py --target agent --limit 3 --min-pass-rate 0
+
+# Archive the per-case results + log to MLflow.
+python scripts/eval.py --target chain --json out/eval.json --mlflow
+```
+
+Exit codes: `0` on success, `1` when `pass_rate` or
+`mean_context_precision_at_k` falls below the configured threshold, `2`
+on argument / dataset usage errors. The CLI prints one row per case
+followed by an aggregate summary; the JSON dump includes the answer,
+retrieved doc ids, per-case latency, and the raw scorer extras for
+later analysis.
+
+Optional `ragas` extra: install `pip install ragas` and
+`maybe_score_with_ragas` (currently a no-op stub) becomes the seam
+where a full ragas-based scoring pass can land in a future wave without
+breaking the CLI or runner signatures.
+
 ## OpenAPI
 
 - **Versioned specs**: `openapi/*.openapi.json` (CI-checked) and optional `*.openapi.yaml` — regenerate with `python scripts/export_openapi.py --yaml --output openapi`.

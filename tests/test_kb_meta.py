@@ -88,6 +88,27 @@ def test_redis_round_trip_with_fakeredis(monkeypatch, run_async) -> None:
     assert run_async(store.read()) is None
 
 
+def test_redis_read_normalises_bytes_keys_and_values(monkeypatch, run_async) -> None:
+    """Some redis / fakeredis versions return bytes from HGETALL even with decode_responses=True.
+
+    The Wave 2 RedisKBMetaStore.read must normalise both keys and values so
+    indexing with ``data["provider"]`` works regardless. Regression test for
+    the CI failure where ``fakeredis==2.36.0`` returned ``b'provider'`` keys.
+    """
+
+    class _BytesReturningFake:
+        async def hgetall(self, _key: str) -> dict[bytes, bytes]:
+            return {b"provider": b"ollama", b"model": b"nomic-embed-text", b"dim": b"768"}
+
+    monkeypatch.setattr(
+        "sorakai.common.kb_meta.redis.from_url",
+        lambda *_a, **_k: _BytesReturningFake(),
+    )
+    store = RedisKBMetaStore("redis://fake")
+    meta = run_async(store.read())
+    assert meta == KBMeta(provider="ollama", model="nomic-embed-text", dim=768)
+
+
 def test_redis_corrupt_meta_raises_store_error(monkeypatch, run_async) -> None:
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(

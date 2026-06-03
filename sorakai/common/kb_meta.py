@@ -26,6 +26,16 @@ from sorakai.core.errors import DimensionMismatchError, StoreError
 KB_META_KEY = "sorakai:kb:meta"
 
 
+def _to_str(x: str | bytes) -> str:
+    """Normalise a redis value that may come back as bytes (some clients) or str.
+
+    Avoids relying on the connection's ``decode_responses=True`` setting being
+    honoured for every command - notably ``HGETALL`` returns bytes in some
+    fakeredis versions even when the flag is set.
+    """
+    return x.decode("utf-8") if isinstance(x, bytes) else x
+
+
 @dataclass(frozen=True, slots=True)
 class KBMeta:
     """Identity of the embedding model that built the current KB."""
@@ -100,13 +110,17 @@ class RedisKBMetaStore(KBMetaStore):
         self._redis: redis.Redis[str] = redis.from_url(url, decode_responses=True)
 
     async def read(self) -> KBMeta | None:
-        data = await self._redis.hgetall(KB_META_KEY)
-        if not data:
+        raw = await self._redis.hgetall(KB_META_KEY)
+        if not raw:
             return None
+        # Some redis / fakeredis versions ignore ``decode_responses=True`` for
+        # ``HGETALL`` in async mode and return ``bytes`` keys + values. Normalise
+        # here so the rest of the code can index with str literals.
+        data = {_to_str(k): _to_str(v) for k, v in raw.items()}
         try:
             return KBMeta(
-                provider=str(data["provider"]),
-                model=str(data["model"]),
+                provider=data["provider"],
+                model=data["model"],
                 dim=int(data["dim"]),
             )
         except (KeyError, ValueError) as exc:

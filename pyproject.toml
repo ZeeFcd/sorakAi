@@ -93,7 +93,6 @@ module = [
   "sorakai.common.logging_utils",     # tightened in Wave 8
   "sorakai.common.mlflow_tracking",   # tightened in Wave 8
   "sorakai.common.openapi_bundle",    # tightened in Wave 11
-  "sorakai.common.retrieval",         # tightened in Wave 2
   "sorakai.common.schemas",           # tightened in Wave 3
   "sorakai.common.store",             # tightened in Wave 4 + Wave 5
   "sorakai.gateway.app",              # tightened in Wave 10

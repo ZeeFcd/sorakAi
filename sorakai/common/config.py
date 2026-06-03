@@ -79,6 +79,37 @@ class Settings(BaseSettings):
     ollama_chat_model: str = Field(default="llama3.2:1b", alias="OLLAMA_CHAT_MODEL")
     ollama_embedding_model: str = Field(default="nomic-embed-text", alias="OLLAMA_EMBEDDING_MODEL")
 
+    # --- Ollama embeddings tuning (Wave 2) -------------------------------
+    ollama_embed_batch: int = Field(
+        default=64,
+        alias="OLLAMA_EMBED_BATCH",
+        ge=1,
+        le=2048,
+        description="Max chunks per `/api/embed` request body before splitting into more batches.",
+    )
+    ollama_embed_concurrency: int = Field(
+        default=4,
+        alias="OLLAMA_EMBED_CONCURRENCY",
+        ge=1,
+        le=64,
+        description="Max concurrent in-flight embed requests (bounded by an asyncio.Semaphore).",
+    )
+    ollama_embed_timeout_seconds: float = Field(
+        default=60.0,
+        alias="OLLAMA_EMBED_TIMEOUT_SECONDS",
+        gt=0,
+        description="Per-request HTTP timeout for embed calls (separate from `request_timeout_seconds`).",
+    )
+    ollama_embed_use_batch_endpoint: bool = Field(
+        default=True,
+        alias="OLLAMA_EMBED_USE_BATCH_ENDPOINT",
+        description=(
+            "When true (default), use the modern `/api/embed` endpoint that accepts a list of inputs. "
+            "Set to false to force the legacy per-input `/api/embeddings` endpoint (for older Ollama). "
+            "The adapter also falls back automatically on 404 from the batched endpoint."
+        ),
+    )
+
     # --- MLflow ----------------------------------------------------------
     mlflow_tracking_uri: str | None = Field(
         default=None,

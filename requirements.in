@@ -57,3 +57,9 @@ redis>=5.0.0
 # --- Vector store (pluggable via VECTOR_STORE env; only qdrant adapter shipped today) ---
 qdrant-client>=1.12.0
 langchain-qdrant>=0.2.0
+
+# --- Gateway hardening (Wave 10) ---
+# slowapi is a thin Starlette-aware wrapper over `limits`; we use it to
+# rate-limit gateway proxies (Redis-backed when REDIS_URL is set, memory
+# otherwise). limits is its dependency and provides the storage backends.
+slowapi>=0.1.9

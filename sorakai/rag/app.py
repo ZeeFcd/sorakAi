@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from sorakai import __version__
 from sorakai.chains.agent_graph import ainvoke_agent, build_agent_graph
@@ -30,12 +28,8 @@ from sorakai.common.kb_meta import (
     RedisKBMetaStore,
     create_kb_meta_store,
 )
-from sorakai.common.logging_utils import (
-    bind_request_id,
-    clear_request_context,
-    get_logger,
-    new_request_id,
-)
+from sorakai.common.logging_utils import get_logger
+from sorakai.common.middleware import install_common_middleware
 from sorakai.common.mlflow_callback import MlflowChainCallback
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.schemas import (
@@ -135,19 +129,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("RAG service shutdown")
 
 
-def _install_cors(app: FastAPI) -> None:
-    """Install CORS. ``*`` and credentials are never combined (browsers reject it)."""
-    origins = get_settings().cors_origins
-    allow_credentials = "*" not in origins
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-
 def _mlflow_callbacks(
     settings: Any,
     *,
@@ -203,28 +184,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    _install_cors(app)
-
-    @app.middleware("http")
-    async def request_id_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        rid = request.headers.get("X-Request-ID") or new_request_id()
-        bind_request_id(rid)
-        start = time.perf_counter()
-        try:
-            response = await call_next(request)
-        finally:
-            clear_request_context()
-        response.headers["X-Request-ID"] = rid
-        response.headers["X-Process-Time"] = f"{(time.perf_counter() - start) * 1000:.2f}ms"
-        return response
-
-    @app.exception_handler(Exception)
-    async def unhandled_exc(_: Request, exc: Exception) -> JSONResponse:
-        logger.exception("Unhandled error: %s", exc)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "Internal server error"},
-        )
+    install_common_middleware(app, get_settings(), service="rag")
 
     @app.get("/health", response_model=HealthResponse, tags=["ops"])
     async def health() -> HealthResponse:

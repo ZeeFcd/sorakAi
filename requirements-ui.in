@@ -1,0 +1,16 @@
+# Streamlit UI dependencies (Wave 10). The runtime services do NOT need
+# Streamlit, so it stays out of `requirements.in` / `requirements-dev.in`
+# to keep the gateway / ingest / RAG containers slim. Install with:
+#
+#   pip install -r requirements-ui.txt
+#
+# then launch with:
+#
+#   streamlit run ui/streamlit_app.py
+#
+# The UI talks to the gateway via httpx, which is already pinned in
+# requirements.txt - so the only addition here is Streamlit itself.
+
+-r requirements.in
+
+streamlit>=1.36.0

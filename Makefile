@@ -16,8 +16,8 @@ TEST_DIR   := tests
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv install install-dev lock lint lint-fix format typecheck \
-        test test-cov openapi openapi-check dev up down clean eval
+.PHONY: help venv install install-dev install-ui lock lint lint-fix format \
+        typecheck test test-cov openapi openapi-check dev up down clean eval ui
 
 help:
 	@awk 'BEGIN {FS = ":.*##"; printf "Targets:\n"} \
@@ -39,19 +39,27 @@ lock: ## Recompile requirements*.txt from requirements*.in (never emits private 
 		--output-file=requirements.txt requirements.in
 	$(PIP_COMPILE) --resolver=backtracking --strip-extras --no-emit-index-url --no-emit-trusted-host \
 		--output-file=requirements-dev.txt requirements-dev.in
+	$(PIP_COMPILE) --resolver=backtracking --strip-extras --no-emit-index-url --no-emit-trusted-host \
+		--output-file=requirements-ui.txt requirements-ui.in
+
+install-ui: ## Install the Streamlit UI deps (heavy; not needed by services)
+	$(PIP) install -r requirements-ui.txt
+
+ui: ## Launch the Streamlit chat UI against the gateway
+	$(VENV)/bin/streamlit run ui/streamlit_app.py
 
 lint: ## Run ruff (must be green on PR)
-	$(RUFF) check $(PKG) $(TEST_DIR) scripts
-	$(RUFF) format --check $(PKG) $(TEST_DIR) scripts
+	$(RUFF) check $(PKG) $(TEST_DIR) scripts ui
+	$(RUFF) format --check $(PKG) $(TEST_DIR) scripts ui
 
 lint-fix: ## Apply ruff autofixes
-	$(RUFF) check --fix $(PKG) $(TEST_DIR) scripts
-	$(RUFF) format $(PKG) $(TEST_DIR) scripts
+	$(RUFF) check --fix $(PKG) $(TEST_DIR) scripts ui
+	$(RUFF) format $(PKG) $(TEST_DIR) scripts ui
 
 format: lint-fix ## Alias for lint-fix
 
 typecheck: ## Run mypy --strict (must be green on PR)
-	$(MYPY) $(PKG) $(TEST_DIR) scripts
+	$(MYPY) $(PKG) $(TEST_DIR) scripts ui
 
 test: ## Run the test suite
 	$(PYTEST) $(TEST_DIR) --no-cov

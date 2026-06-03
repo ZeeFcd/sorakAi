@@ -455,6 +455,62 @@ Optional `ragas` extra: install `pip install ragas` and
 where a full ragas-based scoring pass can land in a future wave without
 breaking the CLI or runner signatures.
 
+### Gateway hardening (Wave 10)
+
+The gateway is the only authenticated edge of the stack. The three
+shared middleware lanes live in `sorakai.common.middleware`
+(`install_common_middleware`) and the gateway-specific bearer auth +
+rate limiter live in `sorakai.common.security`
+(`install_gateway_security`).
+
+| Setting                  | Default | Effect                                                                 |
+| ------------------------ | ------- | ---------------------------------------------------------------------- |
+| `GATEWAY_API_KEY`        | _unset_ | When set, every `/v1/*` and `/api/v1/*` call needs `Authorization: Bearer <key>`. Unset = open. |
+| `REQUEST_MAX_BYTES`      | `10485760` (10 MiB) | Hard cap on inbound bodies (applies to every service). `0` disables. |
+| `RATE_LIMIT_PER_MINUTE`  | `0`     | Per-IP request budget on the gateway. `0` disables; any positive value enables `slowapi`. |
+| `RATE_LIMIT_BURST`       | `20`    | Short-window burst allowance on top of the per-minute budget.          |
+| `REDIS_URL`              | _unset_ | When set on the gateway, the rate limiter uses Redis storage; otherwise in-memory. |
+
+Health and readiness probes (`/health`, `/ready`) stay unauthenticated
+so liveness/readiness checks don't need credentials.
+
+### URL surface consolidation (Wave 10)
+
+Wave 10 makes `/v1/*` the **canonical** gateway surface. The pre-Wave-10
+`/api/v1/*` paths still resolve - they're served as
+`308 Permanent Redirect` responses (RFC 7538 preserves both the method
+and the body, so POSTs forwarded by curl/httpx clients keep working).
+The deprecation window is one release; new integrations should target
+`/v1/*` directly.
+
+| Surface          | Status                                            |
+| ---------------- | ------------------------------------------------- |
+| `GET /health`    | Unauthenticated, present on every service.        |
+| `GET /ready`     | Unauthenticated, gateway-only.                    |
+| `/v1/*`          | Canonical paths, guarded by bearer + rate limit.  |
+| `/api/v1/*`      | 308 redirect to `/v1/*`, hidden from OpenAPI.     |
+
+### Chat UI (Wave 10)
+
+A minimal Streamlit chat front-end lives under `ui/`. It talks to the
+gateway exclusively (no direct access to ingest/RAG) so the same
+front-end works against a locked-down deployment with
+`GATEWAY_API_KEY` set.
+
+```bash
+# Streamlit is an *optional* extra - the runtime services don't need it.
+pip install -r requirements-ui.txt
+make ui              # or: streamlit run ui/streamlit_app.py
+```
+
+Or via docker-compose:
+
+```bash
+docker compose --profile ui up --build  # exposes the UI at :8501
+```
+
+See `ui/README.md` for the full feature/config table.
+
 ## OpenAPI
 
 - **Versioned specs**: `openapi/*.openapi.json` (CI-checked) and optional `*.openapi.yaml` — regenerate with `python scripts/export_openapi.py --yaml --output openapi`.

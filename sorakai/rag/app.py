@@ -30,8 +30,13 @@ from sorakai.common.kb_meta import (
     RedisKBMetaStore,
     create_kb_meta_store,
 )
-from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
-from sorakai.common.mlflow_tracking import log_params_metrics, mlflow_run
+from sorakai.common.logging_utils import (
+    bind_request_id,
+    clear_request_context,
+    get_logger,
+    new_request_id,
+)
+from sorakai.common.mlflow_callback import MlflowChainCallback
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.schemas import (
     AgentRequest,
@@ -49,6 +54,12 @@ from sorakai.common.sse import (
     sse_event,
 )
 from sorakai.common.store import KnowledgeStore, RedisKnowledgeStore, create_store
+from sorakai.common.telemetry import (
+    configure_tracing,
+    instrument_fastapi,
+    instrument_httpx,
+    span,
+)
 from sorakai.core.errors import DimensionMismatchError
 from sorakai.core.logging import configure_logging
 from sorakai.infra.vector_store import VectorStore, get_vector_store
@@ -61,7 +72,10 @@ logger = get_logger("sorakai.rag")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, log_format=settings.log_format)
+    configure_tracing("sorakai-rag", settings, version=__version__)
+    instrument_fastapi(app)
+    instrument_httpx()
 
     store = create_store(settings.redis_url)
     chat_concrete = create_chat_store(
@@ -134,6 +148,30 @@ def _install_cors(app: FastAPI) -> None:
     )
 
 
+def _mlflow_callbacks(
+    settings: Any,
+    *,
+    run_name: str,
+    static_params: dict[str, Any],
+) -> list[Any] | None:
+    """Build the callback list passed into chain/agent ``RunnableConfig``.
+
+    Returns ``None`` (not ``[]``) when MLflow tracking is disabled so the
+    chain skips the ``callbacks`` config branch entirely - no overhead in
+    test runs or in deployments without an MLflow server.
+    """
+    if not settings.mlflow_callback_enabled or not settings.mlflow_tracking_uri:
+        return None
+    return [
+        MlflowChainCallback(
+            experiment_name="sorakai-rag",
+            run_name=run_name,
+            tracking_uri=settings.mlflow_tracking_uri,
+            static_params=static_params,
+        )
+    ]
+
+
 def _raise_dim_mismatch(exc: DimensionMismatchError) -> None:
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
@@ -170,12 +208,12 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         rid = request.headers.get("X-Request-ID") or new_request_id()
-        token = request_id_ctx.set(rid)
+        bind_request_id(rid)
         start = time.perf_counter()
         try:
             response = await call_next(request)
         finally:
-            request_id_ctx.reset(token)
+            clear_request_context()
         response.headers["X-Request-ID"] = rid
         response.headers["X-Process-Time"] = f"{(time.perf_counter() - start) * 1000:.2f}ms"
         return response
@@ -240,19 +278,31 @@ def create_app() -> FastAPI:
         if not summaries:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No documents in knowledge base")
 
-        try:
-            result: dict[str, Any] = await ainvoke_rag(chain, question=body.question, session_id=sid)
-        except ValueError as e:
-            # The vector store / retrieval layer raises ValueError when dims
-            # diverge mid-flight (e.g. KB was rewritten between the meta read
-            # and the actual search). Translate to the same 409 the dim guard
-            # uses so clients have a single error code to handle.
-            if "dim" in str(e).lower():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"error": "embedding_dim_mismatch", "message": str(e)},
-                ) from e
-            raise
+        callbacks = _mlflow_callbacks(
+            settings,
+            run_name="query",
+            static_params={"service": "rag", "top_k": body.top_k, "session": bool(sid)},
+        )
+
+        with span("rag.query", session=bool(sid), top_k=body.top_k):
+            try:
+                result: dict[str, Any] = await ainvoke_rag(
+                    chain,
+                    question=body.question,
+                    session_id=sid,
+                    callbacks=callbacks,
+                )
+            except ValueError as e:
+                # The vector store / retrieval layer raises ValueError when dims
+                # diverge mid-flight (e.g. KB was rewritten between the meta read
+                # and the actual search). Translate to the same 409 the dim guard
+                # uses so clients have a single error code to handle.
+                if "dim" in str(e).lower():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={"error": "embedding_dim_mismatch", "message": str(e)},
+                    ) from e
+                raise
 
         context = str(result.get("context", ""))
         sources_used = int(result.get("sources_used", 0))
@@ -260,16 +310,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not retrieve context")
 
         answer = str(result.get("answer", ""))
-
-        with mlflow_run("sorakai-rag", run_name="query"):
-            log_params_metrics(
-                {"service": "rag", "top_k": float(body.top_k), "session": float(bool(sid))},
-                {
-                    "context_len": float(len(context)),
-                    "answer_len": float(len(answer)),
-                    "sources_used": float(sources_used),
-                },
-            )
 
         return QueryResponse(
             answer=answer,
@@ -350,15 +390,27 @@ def create_app() -> FastAPI:
         await store.list_documents()
 
         max_steps = int(body.max_steps or cfg.agent_max_steps)
-        try:
-            result = await ainvoke_agent(graph, question=body.question, session_id=sid, max_steps=max_steps)
-        except ValueError as e:
-            if "dim" in str(e).lower():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"error": "embedding_dim_mismatch", "message": str(e)},
-                ) from e
-            raise
+        callbacks = _mlflow_callbacks(
+            cfg,
+            run_name="agent",
+            static_params={"service": "rag-agent", "max_steps": max_steps, "session": bool(sid)},
+        )
+        with span("agent.run", session=bool(sid), max_steps=max_steps):
+            try:
+                result = await ainvoke_agent(
+                    graph,
+                    question=body.question,
+                    session_id=sid,
+                    max_steps=max_steps,
+                    callbacks=callbacks,
+                )
+            except ValueError as e:
+                if "dim" in str(e).lower():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={"error": "embedding_dim_mismatch", "message": str(e)},
+                    ) from e
+                raise
 
         tool_calls: list[ToolCall] = list(result.get("tool_calls", []) or [])
         tool_call_entries = [_summarise_tool_call(tc) for tc in tool_calls]

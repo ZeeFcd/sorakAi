@@ -29,9 +29,18 @@ def test_error_hierarchy_is_catchable_as_base():
 
 
 def test_get_logger_returns_named_logger():
+    """Wave 8 swapped stdlib loggers for structlog BoundLoggers.
+
+    The returned object is no longer ``logging.Logger`` but still exposes
+    the standard ``.info`` / ``.warning`` API and carries the logger name
+    on the structlog proxy so the ``add_logger_name`` processor produces it.
+    """
     logger = get_logger("sorakai.test")
-    assert isinstance(logger, logging.Logger)
-    assert logger.name == "sorakai.test"
+    assert callable(getattr(logger, "info", None))
+    assert callable(getattr(logger, "warning", None))
+    assert getattr(logger, "name", None) == "sorakai.test"
+    # stdlib loggers with the same name still answer normally.
+    assert logging.getLogger("sorakai.test").name == "sorakai.test"
 
 
 def test_configure_logging_sets_sorakai_level(monkeypatch):

@@ -3,7 +3,9 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
+import mlflow
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,8 +20,12 @@ from sorakai.common.kb_meta import (
     RedisKBMetaStore,
     create_kb_meta_store,
 )
-from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
-from sorakai.common.mlflow_tracking import log_params_metrics, mlflow_run
+from sorakai.common.logging_utils import (
+    bind_request_id,
+    clear_request_context,
+    get_logger,
+    new_request_id,
+)
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
 from sorakai.common.schemas import (
     DocumentDeleteResponse,
@@ -32,6 +38,12 @@ from sorakai.common.schemas import (
     new_document_id,
 )
 from sorakai.common.store import KnowledgeStore, RedisKnowledgeStore, create_store
+from sorakai.common.telemetry import (
+    configure_tracing,
+    instrument_fastapi,
+    instrument_httpx,
+    span,
+)
 from sorakai.core.errors import DimensionMismatchError
 from sorakai.core.logging import configure_logging
 
@@ -41,7 +53,10 @@ logger = get_logger("sorakai.ingest")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, log_format=settings.log_format)
+    configure_tracing("sorakai-ingest", settings, version=__version__)
+    instrument_fastapi(app)
+    instrument_httpx()
     store = create_store(settings.redis_url)
     kb_meta = create_kb_meta_store(settings.redis_url)
     app.state.store = store
@@ -57,6 +72,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if isinstance(kb_meta, RedisKBMetaStore):
         await kb_meta.aclose()
     logger.info("Ingest service shutdown")
+
+
+def _record_ingest_metrics(
+    settings: Any,
+    *,
+    run_name: str,
+    params: dict[str, Any],
+    metrics: dict[str, float],
+) -> None:
+    """Log one MLflow run with the ingest job's params + metrics.
+
+    Silently no-ops when ``mlflow_tracking_uri`` is unset or when MLflow
+    raises (network blip, missing experiment, etc.). Centralised here so
+    Wave 8's structlog migration removed the last call site of the
+    legacy ``mlflow_tracking.mlflow_run`` context manager.
+    """
+    if not settings.mlflow_tracking_uri:
+        return
+    try:
+        mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+        mlflow.set_experiment("sorakai-ingest")
+        with mlflow.start_run(run_name=run_name):
+            mlflow.log_params({k: str(v) for k, v in params.items()})
+            for key, value in metrics.items():
+                mlflow.log_metric(key, value)
+    except Exception as exc:
+        logger.warning("MLflow ingest run skipped: %s", exc)
 
 
 def _install_cors(app: FastAPI) -> None:
@@ -89,12 +131,12 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         rid = request.headers.get("X-Request-ID") or new_request_id()
-        token = request_id_ctx.set(rid)
+        bind_request_id(rid)
         start = time.perf_counter()
         try:
             response = await call_next(request)
         finally:
-            request_id_ctx.reset(token)
+            clear_request_context()
         response.headers["X-Request-ID"] = rid
         response.headers["X-Process-Time"] = f"{(time.perf_counter() - start) * 1000:.2f}ms"
         return response
@@ -130,16 +172,23 @@ def create_app() -> FastAPI:
         kb_meta: KBMetaStore = request.app.state.kb_meta
         settings = get_settings()
 
-        chunks = chunk_document(
-            body.content,
+        with span(
+            "ingest.chunk",
+            filename=body.filename,
             chunk_size=body.chunk_size,
             chunk_overlap=body.chunk_overlap,
-            filename=body.filename,
-            mime_type=body.mime_type,
-        )
+        ):
+            chunks = chunk_document(
+                body.content,
+                chunk_size=body.chunk_size,
+                chunk_overlap=body.chunk_overlap,
+                filename=body.filename,
+                mime_type=body.mime_type,
+            )
         if not chunks:
             raise HTTPException(status_code=400, detail="No chunks produced from content")
-        vectors = await embed_chunks(chunks)
+        with span("ingest.embed", num_chunks=len(chunks)):
+            vectors = await embed_chunks(chunks)
 
         # Dim guard: every chunk-vector must share a dim, and the KB must
         # have been built (or be being built) with the same provider/model/dim.
@@ -199,18 +248,23 @@ def create_app() -> FastAPI:
                 mime_type=body.mime_type,
             )
 
-        with mlflow_run("sorakai-ingest", run_name=f"ingest-{body.filename}"):
-            log_params_metrics(
-                {
-                    "filename": body.filename,
-                    "chunk_size": body.chunk_size,
-                    "chunk_overlap": body.chunk_overlap,
-                    "mime_type": body.mime_type or "auto",
-                    "service": "ingest",
-                    "replace_kb": body.replace_kb,
-                },
-                {"num_chunks": float(len(chunks))},
-            )
+        # MLflow logging for the ingest pipeline stays at module scope (no
+        # LangChain callback to plug in) but we route the writes through
+        # the same helper so a missing tracking URI silently no-ops just
+        # like in the RAG handler.
+        _record_ingest_metrics(
+            settings,
+            run_name=f"ingest-{body.filename}",
+            params={
+                "filename": body.filename,
+                "chunk_size": body.chunk_size,
+                "chunk_overlap": body.chunk_overlap,
+                "mime_type": body.mime_type or "auto",
+                "service": "ingest",
+                "replace_kb": body.replace_kb,
+            },
+            metrics={"num_chunks": float(len(chunks))},
+        )
 
         return DocumentIngestResponse(
             message=f"Stored {len(chunks)} chunks for '{body.filename}' (append)"

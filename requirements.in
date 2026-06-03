@@ -35,6 +35,22 @@ rank-bm25>=0.2.2
 # 0.6 release stabilised the langchain-core 1.x message + tool interfaces.
 langgraph>=0.6.0
 
+# --- Observability (Wave 8) ---
+# structlog gives us structured logs with bound contextvars (request_id +
+# trace_id) shared across services. Pin >=24 because the 24.x line is the
+# first to fully type the make_filtering_bound_logger helper we rely on
+# inside sorakai/core/logging.py.
+structlog>=24.1.0
+# OpenTelemetry: SDK + API are the always-on dependencies; the FastAPI +
+# httpx instrumentors plug into the apps' lifespans. We export to stdout
+# by default (zero-config developer mode) and switch to OTLP when an
+# endpoint is set, so the otlp-proto-grpc exporter is also pulled in.
+opentelemetry-api>=1.27.0
+opentelemetry-sdk>=1.27.0
+opentelemetry-instrumentation-fastapi>=0.48b0
+opentelemetry-instrumentation-httpx>=0.48b0
+opentelemetry-exporter-otlp-proto-grpc>=1.27.0
+
 # --- Storage ---
 redis>=5.0.0
 

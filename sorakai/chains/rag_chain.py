@@ -243,12 +243,20 @@ async def ainvoke_rag(
     *,
     question: str,
     session_id: str | None,
+    callbacks: list[Any] | None = None,
 ) -> dict[str, Any]:
-    """Public helper so handlers don't have to know the payload shape."""
+    """Public helper so handlers don't have to know the payload shape.
+
+    ``callbacks`` is forwarded into the runnable's ``RunnableConfig`` so
+    Wave 8's :class:`~sorakai.common.mlflow_callback.MlflowChainCallback`
+    (or any other :class:`langchain_core.callbacks.BaseCallbackHandler`)
+    can observe LLM + retrieval + tool calls happening inside the chain.
+    """
     payload: dict[str, Any] = {"question": question}
     if session_id:
         payload["session_id"] = session_id
-    result: dict[str, Any] = await chain.ainvoke(payload)
+    config: RunnableConfig | None = cast(RunnableConfig, {"callbacks": callbacks}) if callbacks else None
+    result: dict[str, Any] = await chain.ainvoke(payload, config=config)
     return result
 
 

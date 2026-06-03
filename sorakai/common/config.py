@@ -210,6 +210,59 @@ class Settings(BaseSettings):
         ),
     )
 
+    # --- Observability (Wave 8) ------------------------------------------
+    otel_enabled: bool = Field(
+        default=True,
+        alias="OTEL_ENABLED",
+        description=(
+            "Master switch for OpenTelemetry. When false the SDK is never installed and "
+            "spans become no-ops; helps in unit tests and in stripped-down deployments."
+        ),
+    )
+    otel_exporter: str = Field(
+        default="console",
+        alias="OTEL_EXPORTER",
+        description=(
+            "Span exporter to install: 'console' (stdout, default) or 'otlp' (gRPC -> Jaeger/Tempo). "
+            "Setting OTEL_EXPORTER_OTLP_ENDPOINT also implicitly switches to otlp."
+        ),
+    )
+    otel_exporter_otlp_endpoint: str | None = Field(
+        default=None,
+        alias="OTEL_EXPORTER_OTLP_ENDPOINT",
+        description="OTLP gRPC endpoint (e.g. http://jaeger:4317); honoured when otel_exporter='otlp'.",
+    )
+    otel_service_name: str | None = Field(
+        default=None,
+        alias="OTEL_SERVICE_NAME",
+        description=(
+            "Resource service.name. Defaults to the per-service name passed to configure_tracing "
+            "(e.g. 'sorakai-rag'); set this to override for multi-tenant deployments."
+        ),
+    )
+    otel_sampler_ratio: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        alias="OTEL_SAMPLER_RATIO",
+        description="Parent-based trace-id ratio sampler. 1.0 = always sample, 0.0 = drop all.",
+    )
+    log_format: str = Field(
+        default="json",
+        alias="LOG_FORMAT",
+        description=(
+            "Structlog renderer: 'json' (containers, default) or 'console' (human-friendly, colourful on a TTY)."
+        ),
+    )
+    mlflow_callback_enabled: bool = Field(
+        default=True,
+        alias="MLFLOW_CALLBACK_ENABLED",
+        description=(
+            "Toggle the LangChain MlflowChainCallback that buffers per-chain runs into MLflow. "
+            "When mlflow_tracking_uri is unset the callback also becomes a no-op."
+        ),
+    )
+
     # --- MLflow ----------------------------------------------------------
     mlflow_tracking_uri: str | None = Field(
         default=None,

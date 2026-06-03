@@ -22,6 +22,12 @@ langchain-core>=0.3.0
 langchain-ollama>=0.2.0
 langchain-text-splitters>=0.3.0
 
+# --- Retrieval (Wave 6) ---
+# rank-bm25 powers the lexical half of the Wave 6 hybrid retriever; we fuse
+# its scores with the vector backend's via Reciprocal Rank Fusion in
+# sorakai/chains/retriever.py (no langchain-community dependency).
+rank-bm25>=0.2.2
+
 # --- Storage ---
 redis>=5.0.0
 

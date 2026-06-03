@@ -38,6 +38,10 @@ def _isolated_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("LLM_PROVIDER", "stub")
     monkeypatch.setenv("EMBEDDING_PROVIDER", "char")
     monkeypatch.setenv("VECTOR_STORE", "memory")
+    # Wave 6 hybrid retriever is opt-in for tests so the generic suite stays
+    # decoupled from rank-bm25's tokenisation quirks. Dedicated hybrid tests
+    # re-enable it locally.
+    monkeypatch.setenv("HYBRID_RETRIEVER_ENABLED", "false")
     get_settings.cache_clear()
     try:
         yield

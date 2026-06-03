@@ -1,32 +1,43 @@
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from sorakai import __version__
-from sorakai.common.chat_history import RedisChatHistoryStore, create_chat_store, validate_session_id
+from sorakai.chains.rag_chain import (
+    ainvoke_rag,
+    build_rag_chain,
+    render_context_preview,
+)
+from sorakai.common.chat_history import (
+    InMemoryChatHistoryStore,
+    RedisChatHistoryStore,
+    create_chat_store,
+    validate_session_id,
+)
 from sorakai.common.config import get_settings
-from sorakai.common.embedding import embed_chunks
 from sorakai.common.kb_meta import (
     KBMeta,
     KBMetaStore,
     RedisKBMetaStore,
     create_kb_meta_store,
 )
-from sorakai.common.llm import ask_llm
 from sorakai.common.logging_utils import get_logger, new_request_id, request_id_ctx
 from sorakai.common.mlflow_tracking import log_params_metrics, mlflow_run
 from sorakai.common.openapi_bundle import register_bundled_openapi_routes
-from sorakai.common.retrieval import retrieve_top_k_context
 from sorakai.common.schemas import HealthResponse, QueryRequest, QueryResponse, ReadinessResponse
 from sorakai.common.store import KnowledgeStore, RedisKnowledgeStore, create_store
 from sorakai.core.errors import DimensionMismatchError
 from sorakai.core.logging import configure_logging
+from sorakai.infra.vector_store import VectorStore, get_vector_store
+from sorakai.infra.vector_store.knowledge_store import KnowledgeStoreVectorStore
+from sorakai.infra.vector_store.qdrant import QdrantVectorStore
 
 logger = get_logger("sorakai.rag")
 
@@ -35,38 +46,64 @@ logger = get_logger("sorakai.rag")
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
+
     store = create_store(settings.redis_url)
-    chat = create_chat_store(
+    chat_concrete = create_chat_store(
         settings.redis_url,
         ttl_seconds=settings.chat_history_ttl_seconds,
         max_messages=settings.chat_history_max_messages,
     )
+    # ``create_chat_store`` returns the abstract base for backwards
+    # compatibility, but Wave 6's chain needs to know which concrete
+    # backend it's talking to so it can use the right async write path.
+    if not isinstance(chat_concrete, RedisChatHistoryStore | InMemoryChatHistoryStore):
+        raise TypeError(f"unsupported chat history backend: {type(chat_concrete).__name__}")
+    chat: RedisChatHistoryStore | InMemoryChatHistoryStore = chat_concrete
     kb_meta = create_kb_meta_store(settings.redis_url)
+
+    # Wave 6: the chain is what the handler actually calls. The VectorStore
+    # is picked via the Wave 5 factory; we reuse the KnowledgeStore the
+    # handler is going to keep using for dim-guard reads so memory/redis
+    # backends stay consistent. Qdrant gets its own client (independent of
+    # the KnowledgeStore) - that's intentional, Wave 7 wires the same chain
+    # against the same Qdrant.
+    if settings.vector_store in ("memory", "redis"):
+        vector_store: VectorStore = KnowledgeStoreVectorStore(store)
+    else:
+        vector_store = get_vector_store(settings)
+
+    chain, retriever = await build_rag_chain(settings, vector_store, chat)
+
     app.state.store = store
     app.state.chat_store = chat
     app.state.kb_meta = kb_meta
+    app.state.vector_store = vector_store
+    app.state.rag_chain = chain
+    app.state.retriever = retriever
     logger.info(
-        "RAG service started (redis=%s, llm_provider=%s, embedding_provider=%s)",
+        "RAG service started (redis=%s, llm_provider=%s, embedding_provider=%s, vector_store=%s)",
         bool(settings.redis_url),
         settings.llm_provider,
         settings.embedding_provider,
+        settings.vector_store,
     )
-    yield
-    if isinstance(store, RedisKnowledgeStore):
-        await store.aclose()
-    if isinstance(chat, RedisChatHistoryStore):
-        await chat.aclose()
-    if isinstance(kb_meta, RedisKBMetaStore):
-        await kb_meta.aclose()
-    logger.info("RAG service shutdown")
+
+    try:
+        yield
+    finally:
+        if isinstance(store, RedisKnowledgeStore):
+            await store.aclose()
+        if isinstance(chat, RedisChatHistoryStore):
+            await chat.aclose()
+        if isinstance(kb_meta, RedisKBMetaStore):
+            await kb_meta.aclose()
+        if isinstance(vector_store, QdrantVectorStore):
+            await vector_store.aclose()
+        logger.info("RAG service shutdown")
 
 
 def _install_cors(app: FastAPI) -> None:
-    """Install the CORS middleware.
-
-    Browsers reject ``Access-Control-Allow-Origin: *`` together with
-    ``Access-Control-Allow-Credentials: true``, so we never combine them.
-    """
+    """Install CORS. ``*`` and credentials are never combined (browsers reject it)."""
     origins = get_settings().cors_origins
     allow_credentials = "*" not in origins
     app.add_middleware(
@@ -76,6 +113,29 @@ def _install_cors(app: FastAPI) -> None:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+
+def _raise_dim_mismatch(exc: DimensionMismatchError) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "error": "embedding_metadata_mismatch",
+            "message": str(exc),
+            "expected": {
+                "provider": exc.expected_provider,
+                "model": exc.expected_model,
+                "dim": exc.expected_dim,
+            },
+            "actual": {
+                "provider": exc.actual_provider,
+                "model": exc.actual_model,
+                "dim": exc.actual_dim,
+            },
+            "hint": (
+                "Re-ingest the corpus with the current provider/model, or POST to /v1/documents with replace_kb=true."
+            ),
+        },
+    ) from exc
 
 
 def create_app() -> FastAPI:
@@ -89,7 +149,7 @@ def create_app() -> FastAPI:
     _install_cors(app)
 
     @app.middleware("http")
-    async def request_id_middleware(request: Request, call_next):
+    async def request_id_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         rid = request.headers.get("X-Request-ID") or new_request_id()
         token = request_id_ctx.set(rid)
         start = time.perf_counter()
@@ -124,8 +184,8 @@ def create_app() -> FastAPI:
     @app.post("/v1/query", response_model=QueryResponse, tags=["rag"])
     async def query(body: QueryRequest, request: Request) -> QueryResponse:
         store: KnowledgeStore = request.app.state.store
-        chat_store = request.app.state.chat_store
         kb_meta: KBMetaStore = request.app.state.kb_meta
+        chain = request.app.state.rag_chain
         settings = get_settings()
 
         try:
@@ -133,65 +193,54 @@ def create_app() -> FastAPI:
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
-        loaded = await store.load_flat()
-        if not loaded:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No documents in knowledge base")
-        chunks, embeddings = loaded
-        q_emb = (await embed_chunks([body.question]))[0]
-
-        # Dim guard: query must use the same provider/model/dim as the stored KB.
+        # Wave 6 dim guard: compare stored meta against the live settings'
+        # (provider, model). We don't need to run the embedding here just to
+        # learn the dim - within a given (provider, model) it's fixed - so the
+        # cheap pre-flight catches model swaps before we kick off the chain.
         stored_meta = await kb_meta.read()
         if stored_meta is not None:
             candidate = KBMeta(
                 provider=settings.embedding_provider,
                 model=settings.ollama_embedding_model,
-                dim=q_emb.size,
+                dim=stored_meta.dim,  # placeholder; chain will surface real dim mismatches
             )
-            if not stored_meta.matches(candidate):
-                exc = DimensionMismatchError(
-                    expected_provider=stored_meta.provider,
-                    expected_model=stored_meta.model,
-                    expected_dim=stored_meta.dim,
-                    actual_provider=candidate.provider,
-                    actual_model=candidate.model,
-                    actual_dim=candidate.dim,
+            if (stored_meta.provider, stored_meta.model) != (candidate.provider, candidate.model):
+                _raise_dim_mismatch(
+                    DimensionMismatchError(
+                        expected_provider=stored_meta.provider,
+                        expected_model=stored_meta.model,
+                        expected_dim=stored_meta.dim,
+                        actual_provider=candidate.provider,
+                        actual_model=candidate.model,
+                        actual_dim=candidate.dim,
+                    )
                 )
+
+        # Cheap empty-KB check so we keep the legacy 404 contract.
+        summaries = await store.list_documents()
+        if not summaries:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No documents in knowledge base")
+
+        try:
+            result: dict[str, Any] = await ainvoke_rag(chain, question=body.question, session_id=sid)
+        except ValueError as e:
+            # The vector store / retrieval layer raises ValueError when dims
+            # diverge mid-flight (e.g. KB was rewritten between the meta read
+            # and the actual search). Translate to the same 409 the dim guard
+            # uses so clients have a single error code to handle.
+            if "dim" in str(e).lower():
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "embedding_metadata_mismatch",
-                        "message": str(exc),
-                        "expected": {
-                            "provider": exc.expected_provider,
-                            "model": exc.expected_model,
-                            "dim": exc.expected_dim,
-                        },
-                        "actual": {
-                            "provider": exc.actual_provider,
-                            "model": exc.actual_model,
-                            "dim": exc.actual_dim,
-                        },
-                        "hint": (
-                            "Re-ingest the corpus with the current provider/model, "
-                            "or POST to /v1/documents with replace_kb=true."
-                        ),
-                    },
-                ) from exc
+                    detail={"error": "embedding_dim_mismatch", "message": str(e)},
+                ) from e
+            raise
 
-        context, n_sources = retrieve_top_k_context(q_emb, embeddings, chunks, top_k=body.top_k)
+        context = str(result.get("context", ""))
+        sources_used = int(result.get("sources_used", 0))
         if not context:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Could not retrieve context")
 
-        prior: list[dict[str, str]] = []
-        if sid:
-            prior = await chat_store.get_messages(sid)
-
-        answer = await ask_llm(body.question, context, conversation=prior or None)
-
-        if sid:
-            await chat_store.append_pair(sid, body.question, answer)
-
-        preview = context[:400] + ("…" if len(context) > 400 else "")
+        answer = str(result.get("answer", ""))
 
         with mlflow_run("sorakai-rag", run_name="query"):
             log_params_metrics(
@@ -199,14 +248,14 @@ def create_app() -> FastAPI:
                 {
                     "context_len": float(len(context)),
                     "answer_len": float(len(answer)),
-                    "sources_used": float(n_sources),
+                    "sources_used": float(sources_used),
                 },
             )
 
         return QueryResponse(
             answer=answer,
-            context_preview=preview,
-            sources_used=n_sources,
+            context_preview=render_context_preview(context),
+            sources_used=sources_used,
             session_id=sid,
         )
 

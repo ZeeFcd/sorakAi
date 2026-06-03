@@ -218,6 +218,60 @@ swap the storage backend out via the Wave 5 `VectorStore` Protocol
 (Qdrant / Milvus / pgvector / Redis Search-VECTOR / Pinecone / …) and keep
 Redis as a metadata + cache layer.
 
+### RAG chain (Wave 6)
+
+`POST /v1/query` now runs through an LCEL chain assembled in
+`sorakai/chains/rag_chain.py`. The chain **never** imports a concrete
+provider; it asks the factories the same way every other Wave 1+ entry
+point does. Swapping providers is one env var:
+
+```bash
+LLM_PROVIDER=ollama EMBEDDING_PROVIDER=ollama make dev   # local prod
+LLM_PROVIDER=stub   EMBEDDING_PROVIDER=char    pytest     # tests
+```
+
+Pipeline (returned by `build_rag_chain(settings, vector_store, chat_store)`):
+
+```
+{question, session_id?}
+   │  RunnableWithMessageHistory injects "history" from chat_store
+   ▼
+inner = retriever → prompt(system + history + user) → llm → {"answer", "context", "sources_used"}
+   │
+   ▼ persists (user turn, AI answer) back to chat_store
+{answer, context, sources_used}
+```
+
+The handler turns that dict into the existing `/v1/query` response
+(`answer`, `context_preview`, `sources_used`, `session_id`).
+
+#### Retrieval
+
+Set in `sorakai/common/config.py`:
+
+| Setting                       | Default | Effect                                             |
+| ----------------------------- | ------- | -------------------------------------------------- |
+| `RAG_TOP_K`                   | `5`     | Chunks fed to the prompt (after fusion + rerank).  |
+| `HYBRID_RETRIEVER_ENABLED`    | `true`  | BM25 (`rank-bm25`) + vector via RRF.               |
+| `HYBRID_BM25_WEIGHT`          | `0.4`   | RRF weight on the BM25 ranking.                    |
+| `HYBRID_VECTOR_WEIGHT`        | `0.6`   | RRF weight on the vector ranking.                  |
+| `RERANK_TOP_N`                | `20`    | Cap on the fused list before optional reranker.    |
+| `RERANKER_ENABLED`            | `false` | Wave 6 ships a no-op reranker hook (`NoopReranker`); a real `bge-reranker-base` loader lands in a future wave. |
+
+BM25 is built lazily on the first query — so "seed corpus, then ask"
+works without rebuild plumbing. After a large ingestion in a long-running
+service, call `await app.state.retriever.arebuild()` (or restart) so BM25
+sees the new chunks. Wave 8 wires this hook automatically.
+
+#### Chat history
+
+`RunnableWithMessageHistory` reads/writes per-session memory through the
+Wave 1 `RedisChatHistoryStore` (or `InMemoryChatHistoryStore`) via the
+`SorakaiChatMessageHistory` adapter in `sorakai/chains/history.py`. The
+async path is canonical; sync getters fall back to `asyncio.run` when
+called outside an event loop and raise inside one (so the chain never
+deadlocks itself).
+
 ## OpenAPI
 
 - **Versioned specs**: `openapi/*.openapi.json` (CI-checked) and optional `*.openapi.yaml` — regenerate with `python scripts/export_openapi.py --yaml --output openapi`.

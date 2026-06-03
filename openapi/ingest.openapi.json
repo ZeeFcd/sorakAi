@@ -3,10 +3,21 @@
     "schemas": {
       "DocumentIngestRequest": {
         "example": {
+          "chunk_overlap": 50,
+          "chunk_size": 500,
           "content": "def foo():\n    return 42\n",
-          "filename": "main.py"
+          "filename": "main.py",
+          "mime_type": "text/x-python"
         },
         "properties": {
+          "chunk_overlap": {
+            "default": 50,
+            "description": "Number of characters each chunk overlaps with its neighbour. Must be strictly less than chunk_size; the splitter enforces that.",
+            "maximum": 2000.0,
+            "minimum": 0.0,
+            "title": "Chunk Overlap",
+            "type": "integer"
+          },
           "chunk_size": {
             "default": 500,
             "maximum": 10000.0,
@@ -37,6 +48,19 @@
             "minLength": 1,
             "title": "Filename",
             "type": "string"
+          },
+          "mime_type": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional MIME type hint (e.g. text/x-python, text/markdown). When omitted the splitter falls back to detecting the language from the filename suffix and finally to a plain recursive character split.",
+            "title": "Mime Type"
           },
           "replace_kb": {
             "default": false,

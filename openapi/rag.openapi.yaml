@@ -86,12 +86,34 @@ components:
           maxLength: 4000
           minLength: 1
           title: Question
+        session_id:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Session Id
+          description: If set, prior turns in this session are sent to the model and
+            updated after each reply.
+        top_k:
+          type: integer
+          maximum: 20.0
+          minimum: 1.0
+          title: Top K
+          description: Number of KB chunks to merge into context
+          default: 5
+        use_chat_history:
+          type: boolean
+          title: Use Chat History
+          description: If false, session_id is ignored (stateless turn).
+          default: true
       type: object
       required:
       - question
       title: QueryRequest
       example:
         question: What does foo return?
+        session_id: user-42
+        top_k: 5
     QueryResponse:
       properties:
         answer:
@@ -100,7 +122,18 @@ components:
         context_preview:
           type: string
           title: Context Preview
-          description: Short preview of retrieved chunk
+          description: Short preview of merged retrieval context
+        sources_used:
+          type: integer
+          title: Sources Used
+          description: How many KB chunks were merged into context
+          default: 0
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Id
+          description: Echo when conversation state was used
       type: object
       required:
       - answer

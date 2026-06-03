@@ -20,6 +20,7 @@ mlflow>=2.14.0
 # --- LLM / embeddings (provider-pluggable; only Ollama adapter shipped) ---
 langchain-core>=0.3.0
 langchain-ollama>=0.2.0
+langchain-text-splitters>=0.3.0
 
 # --- Storage ---
 redis>=5.0.0

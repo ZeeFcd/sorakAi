@@ -1,16 +1,44 @@
+from __future__ import annotations
+
 import uuid
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class DocumentIngestRequest(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"example": {"filename": "main.py", "content": "def foo():\n    return 42\n"}}
+        json_schema_extra={
+            "example": {
+                "filename": "main.py",
+                "content": "def foo():\n    return 42\n",
+                "chunk_size": 500,
+                "chunk_overlap": 50,
+                "mime_type": "text/x-python",
+            }
+        }
     )
 
     filename: str = Field(..., min_length=1, max_length=512)
     content: str = Field(..., min_length=1)
     chunk_size: int = Field(default=500, ge=50, le=10_000)
+    chunk_overlap: int = Field(
+        default=50,
+        ge=0,
+        le=2_000,
+        description=(
+            "Number of characters each chunk overlaps with its neighbour. "
+            "Must be strictly less than chunk_size; the splitter enforces that."
+        ),
+    )
+    mime_type: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Optional MIME type hint (e.g. text/x-python, text/markdown). "
+            "When omitted the splitter falls back to detecting the language from "
+            "the filename suffix and finally to a plain recursive character split."
+        ),
+    )
     document_id: str | None = Field(
         default=None,
         description="Stable id for this document; generated if omitted.",
@@ -26,6 +54,14 @@ class DocumentIngestRequest(BaseModel):
     def doc_id_ok(cls, v: str | None) -> str | None:
         if v is not None and not v.strip():
             return None
+        return v
+
+    @field_validator("chunk_overlap")
+    @classmethod
+    def overlap_lt_size(cls, v: int, info: ValidationInfo) -> int:
+        size = info.data.get("chunk_size")
+        if isinstance(size, int) and v >= size:
+            raise ValueError(f"chunk_overlap ({v}) must be < chunk_size ({size})")
         return v
 
 

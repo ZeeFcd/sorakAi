@@ -92,6 +92,35 @@ CHAT_MODEL_REGISTRY["<your_provider>"] = build_<your_provider>_chat
 Then extend `LLMProvider = Literal["ollama","stub",...]` in `sorakai/common/config.py`
 and you're done; no chain, agent, ingest, or RAG handler touches the change.
 
+### Chunker (Wave 3)
+
+`POST /v1/documents` runs the content through a LangChain
+`RecursiveCharacterTextSplitter` (`sorakai/common/ingest.py`). Splitter
+selection is language-aware:
+
+| Hint | Splitter |
+|------|----------|
+| `mime_type=text/x-python` or `filename=*.py / *.pyi` | `RecursiveCharacterTextSplitter.from_language(Language.PYTHON)` (keeps `def` / `class` / blocks intact when possible) |
+| `mime_type=text/markdown` or `filename=*.md / *.markdown / *.mdx` | `from_language(Language.MARKDOWN)` (prefers heading + paragraph boundaries) |
+| anything else | generic recursive splitter (newlines -> sentences -> words -> chars) |
+
+`mime_type` wins over `filename` so explicit caller intent beats guessing.
+Adding a new language is one entry in each of `_FILENAME_LANGUAGE_MAP` and
+`_MIME_LANGUAGE_MAP` plus one in `_LANGUAGE_STRATEGY`.
+
+Request knobs (see `DocumentIngestRequest`):
+
+| Field | Default | Notes |
+|-------|---------|-------|
+| `chunk_size` | `500` | Hard limit per chunk; bounded `[50, 10_000]`. |
+| `chunk_overlap` | `50` | Characters shared between neighbouring chunks; must be strictly `< chunk_size` (Pydantic validator enforces it). |
+| `mime_type` | `null` | Optional override for splitter selection; charset parameters (e.g. `; charset=utf-8`) are stripped before lookup. |
+
+Stored chunks carry `{doc_id, filename, chunk_index, chunk_total, mime}` for
+downstream filtering / attribution. Reads tolerate legacy entries that
+predate the `chunk_total` + `mime` fields (Wave 3 onwards) - missing fields
+read as `-1` / `null` respectively.
+
 ### Storage (Redis)
 
 - **Knowledge base** and **chat history** use **different keys** (they are not one blob):

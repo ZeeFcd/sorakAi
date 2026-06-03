@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from sorakai import __version__
 from sorakai.common.config import get_settings
 from sorakai.common.embedding import embed_chunks
-from sorakai.common.ingest import process_file
+from sorakai.common.ingest import chunk_document
 from sorakai.common.kb_meta import (
     KBMeta,
     KBMetaStore,
@@ -127,7 +127,13 @@ def create_app() -> FastAPI:
         kb_meta: KBMetaStore = request.app.state.kb_meta
         settings = get_settings()
 
-        chunks = process_file(body.content, body.chunk_size)
+        chunks = chunk_document(
+            body.content,
+            chunk_size=body.chunk_size,
+            chunk_overlap=body.chunk_overlap,
+            filename=body.filename,
+            mime_type=body.mime_type,
+        )
         if not chunks:
             raise HTTPException(status_code=400, detail="No chunks produced from content")
         vectors = await embed_chunks(chunks)
@@ -170,13 +176,21 @@ def create_app() -> FastAPI:
         doc_id = body.document_id or new_document_id()
         if body.replace_kb:
             await store.clear_all()
-        await store.append_document(doc_id, body.filename, chunks, vectors)
+        await store.append_document(
+            doc_id,
+            body.filename,
+            chunks,
+            vectors,
+            mime_type=body.mime_type,
+        )
 
         with mlflow_run("sorakai-ingest", run_name=f"ingest-{body.filename}"):
             log_params_metrics(
                 {
                     "filename": body.filename,
                     "chunk_size": body.chunk_size,
+                    "chunk_overlap": body.chunk_overlap,
+                    "mime_type": body.mime_type or "auto",
                     "service": "ingest",
                     "replace_kb": body.replace_kb,
                 },

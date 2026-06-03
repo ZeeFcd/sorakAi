@@ -89,11 +89,9 @@ exclude = ["openapi/", "build/", ".venv/"]
 # Legacy modules: typed as best-effort, will be brought to strict in their waves.
 # Each error code disabled here is paid back by the wave that rewrites the file.
 module = [
-  "sorakai.common.ingest",            # tightened in Wave 3
   "sorakai.common.logging_utils",     # tightened in Wave 8
   "sorakai.common.mlflow_tracking",   # tightened in Wave 8
   "sorakai.common.openapi_bundle",    # tightened in Wave 11
-  "sorakai.common.schemas",           # tightened in Wave 3
   "sorakai.common.store",             # tightened in Wave 4 + Wave 5
   "sorakai.gateway.app",              # tightened in Wave 10
   "sorakai.ingest.app",               # tightened in Wave 4

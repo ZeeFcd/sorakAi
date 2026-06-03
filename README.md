@@ -1,22 +1,88 @@
 # sorakAi
 
-Microservices MVP: **gateway** (8000), **ingest** (8001), **RAG** (8002), **Redis**, **Ollama** (self-hosted LLM), **MLflow** hooks. See `docker-compose.yml` and `k8s/`.
+**Local-first RAG + agent platform.** Three FastAPI services (gateway,
+ingest, RAG) wired together with LangChain LCEL + LangGraph, a Qdrant
+vector store, a Redis-backed chat history, OpenTelemetry tracing, an
+MLflow callback, an evaluation harness, and a Streamlit chat UI. Ships
+fully local against Ollama out of the box — no cloud LLM provider is
+ever called by default.
+
+```text
++---------+        +---------+        +-------+        +--------+
+| Browser | -----> | Gateway | -----> |  RAG  | -----> | Ollama |
+| (UI)    |        |  :8000  |        | :8002 |        | (chat) |
++---------+        +---------+        +-------+        +--------+
+                       |                 |                 |
+                       v                 v                 v
+                   +--------+        +--------+        +--------+
+                   | Ingest |        | Qdrant |        | Ollama |
+                   |  :8001 | -----> | :6333  | <----- | (embed)|
+                   +--------+        +--------+        +--------+
+                       |
+                       v
+                   +-------+    +---------+
+                   | Redis | -- | MLflow  |
+                   | :6379 |    |  :5000  |
+                   +-------+    +---------+
+```
+
+```mermaid
+flowchart LR
+    UI[Streamlit UI :8501] --> GW[Gateway :8000<br/>bearer + rate limit]
+    GW -->|/v1/query, /v1/agent| RAG[RAG :8002<br/>LCEL chain + LangGraph agent]
+    GW -->|/v1/documents| ING[Ingest :8001<br/>chunker + embedder]
+    RAG --> OLLAMA[(Ollama :11434<br/>chat + embed)]
+    RAG --> QDRANT[(Qdrant :6333)]
+    RAG --> REDIS[(Redis :6379<br/>chat history + rate-limit)]
+    ING --> OLLAMA
+    ING --> QDRANT
+    RAG -.span/metrics.-> MLFLOW[(MLflow :5000)]
+    GW -.OTLP.-> JAEGER[(Jaeger :16686<br/>optional)]
+```
+
+## Quickstart
+
+```bash
+git clone https://github.com/ZeeFcd/sorakAi.git && cd sorakAi
+python3.12 -m venv ../sorakaienv && source ../sorakaienv/bin/activate
+make install-dev
+
+# Brings up compose, waits for /health on all three services, pulls
+# Ollama models, ingests a sample corpus, fires a sample query.
+make dev
+# -> Gateway docs at http://127.0.0.1:8000/docs
+```
+
+Want the chat UI as well?
+
+```bash
+make install-ui && make ui
+# Streamlit chat at http://127.0.0.1:8501 (or via compose --profile ui)
+```
+
+Want the eval harness?
+
+```bash
+make eval                         # chain
+$(PY) scripts/eval.py --target agent --mlflow   # agent + MLflow run
+```
 
 ## Environment
 
 Linux-only. Tested on Python 3.12 (see `python:3.12-slim` in [Dockerfile](Dockerfile)).
-Create and use a virtualenv (path is up to you, e.g. `.venv` or `<YOUR_VENV>`):
+Create and use a virtualenv (path is up to you; `make` defaults to
+`../sorakaienv`):
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt          # runtime + tests + lint
-make lint typecheck test                     # full pre-merge check
+python3.12 -m venv ../sorakaienv
+source ../sorakaienv/bin/activate
+make install-dev                              # runtime + tests + lint + hooks
+make lint typecheck test openapi-check        # full pre-merge check
 ```
 
 ## Run services (dev)
 
-With the venv activated:
+The fast path is `make dev`. To run by hand:
 
 ```bash
 uvicorn sorakai.ingest.app:app --reload --port 8001
@@ -25,7 +91,13 @@ export INGEST_SERVICE_URL=http://127.0.0.1:8001 RAG_SERVICE_URL=http://127.0.0.1
 uvicorn sorakai.gateway.app:app --reload --port 8000
 ```
 
-Set the same `REDIS_URL` on ingest and RAG when running as separate processes.
+Set the same `REDIS_URL` on ingest and RAG when running as separate
+processes.
+
+The full provider matrix (LLM, embeddings, vector store, chat history)
+and the 10-line template for plugging in a new adapter live in
+[`docs/providers.md`](docs/providers.md). The version history lives in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ### Fully local - never calls a cloud LLM provider
 
@@ -91,6 +163,9 @@ CHAT_MODEL_REGISTRY["<your_provider>"] = build_<your_provider>_chat
 
 Then extend `LLMProvider = Literal["ollama","stub",...]` in `sorakai/common/config.py`
 and you're done; no chain, agent, ingest, or RAG handler touches the change.
+
+> For the full template (including embeddings and vector stores) plus
+> the registered-adapter table, see [`docs/providers.md`](docs/providers.md).
 
 ### Chunker (Wave 3)
 

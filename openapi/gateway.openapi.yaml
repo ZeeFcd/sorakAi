@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: sorakAi Gateway
   description: BFF orchestrating ingest and RAG microservices
-  version: 0.1.0
+  version: 0.2.0
 paths:
   /health:
     get:

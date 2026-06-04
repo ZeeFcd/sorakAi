@@ -8,9 +8,8 @@
 #
 #   streamlit run ui/streamlit_app.py
 #
-# The UI talks to the gateway via httpx, which is already pinned in
-# requirements.txt - so the only addition here is Streamlit itself.
-
--r requirements.in
-
+# UI-only dependencies. Do not include `-r requirements.in` here: the
+# Streamlit container/client talks to the gateway over HTTP and does not
+# need the backend service stack installed.
+httpx>=0.28.0
 streamlit>=1.36.0

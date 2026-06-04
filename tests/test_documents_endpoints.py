@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 from fastapi.testclient import TestClient
 
+from sorakai.infra.vector_store.base import VectorStore
 from sorakai.ingest.app import create_app
 
 
@@ -51,6 +53,22 @@ def test_list_documents_after_ingest() -> None:
         assert by_id["doc-a"]["chunk_count"] >= 1
 
 
+def test_ingest_writes_configured_vector_store(run_async) -> None:
+    app = create_app()
+    with TestClient(app) as c:
+        _post(c, filename="vector.txt", content="vector searchable content " * 20, document_id="doc-vector")
+
+        async def _assert_vector_store_written() -> None:
+            vector_store: VectorStore = app.state.vector_store
+            summaries = await vector_store.list_docs()
+            assert [s.doc_id for s in summaries] == ["doc-vector"]
+            hits = await vector_store.search(np.ones(256, dtype=np.float32), k=1)
+            assert hits
+            assert hits[0].metadata["doc_id"] == "doc-vector"
+
+        run_async(_assert_vector_store_written())
+
+
 def test_reingest_same_doc_id_overwrites() -> None:
     app = create_app()
     with TestClient(app) as c:
@@ -63,7 +81,7 @@ def test_reingest_same_doc_id_overwrites() -> None:
         assert only["chunk_count"] < int(r1["num_chunks"])
 
 
-def test_delete_document_endpoint() -> None:
+def test_delete_document_endpoint(run_async) -> None:
     app = create_app()
     with TestClient(app) as c:
         _post(c, filename="a.txt", content="aaa " * 30, document_id="doc-a")
@@ -76,6 +94,13 @@ def test_delete_document_endpoint() -> None:
         remaining = c.get("/v1/documents").json()
         assert remaining["total"] == 1
         assert remaining["documents"][0]["doc_id"] == "doc-b"
+
+        async def _assert_vector_store_deleted() -> None:
+            vector_store: VectorStore = app.state.vector_store
+            summaries = await vector_store.list_docs()
+            assert {s.doc_id for s in summaries} == {"doc-b"}
+
+        run_async(_assert_vector_store_deleted())
 
 
 def test_delete_unknown_doc_id_returns_404() -> None:

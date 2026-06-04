@@ -1,0 +1,8 @@
+# UI-only dependencies for `streamlit run ui/streamlit_app.py`.
+#
+# This file is intentionally small: the UI talks to the gateway over HTTP
+# and does not need the backend service dependencies from requirements.txt.
+# Recompile with `make lock` when network access to PyPI is available.
+
+httpx>=0.28.0
+streamlit>=1.36.0

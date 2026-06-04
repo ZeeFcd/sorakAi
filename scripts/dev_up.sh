@@ -12,6 +12,7 @@
 #   scripts/dev_up.sh --no-query    # bring up + seed, skip the sample query
 #   scripts/dev_up.sh --profile ui  # also start the Streamlit UI on :8501
 #   SKIP_BUILD=1 scripts/dev_up.sh  # `docker compose up -d` without --build
+#   SKIP_CLEAN=1 scripts/dev_up.sh  # keep existing compose containers
 #
 # Linux-only by project convention; uses bash builtins + curl + docker.
 set -Eeuo pipefail
@@ -65,6 +66,12 @@ require() {
 require docker
 require curl
 
+# Some distro-packaged Compose plugins lag behind the Engine and default
+# to an API version older than the daemon accepts (for example Compose
+# v2.11 selecting 1.42 against a Docker 29 daemon that requires >=1.44).
+# Keep this as a floor, not a ceiling: users can still override it.
+export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.44}"
+
 # ---------------------------------------------------------------------------
 # Compose bring-up
 # ---------------------------------------------------------------------------
@@ -80,6 +87,10 @@ if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
 fi
 
 log "starting docker compose (profiles: ${COMPOSE_PROFILES[*]:-none})"
+if [[ "${SKIP_CLEAN:-0}" != "1" ]]; then
+    log "removing stale compose containers (volumes are preserved)"
+    docker compose "${profile_args[@]}" down --remove-orphans
+fi
 # shellcheck disable=SC2086  # we want word-splitting on $build_flag
 docker compose "${profile_args[@]}" up $build_flag -d "${EXTRA_COMPOSE_ARGS[@]}"
 

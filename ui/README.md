@@ -13,14 +13,14 @@ answer streams back.
 pip install -r requirements-ui.txt
 
 # Point UI_GATEWAY_URL at a non-default gateway if needed.
-UI_GATEWAY_URL=http://127.0.0.1:8000 streamlit run ui/streamlit_app.py
+PYTHONPATH=. UI_GATEWAY_URL=http://127.0.0.1:8000 streamlit run ui/streamlit_app.py
 ```
 
 Or use the Makefile shortcuts:
 
 ```bash
 make install-ui      # pip install -r requirements-ui.txt
-make ui              # streamlit run ui/streamlit_app.py
+make ui              # PYTHONPATH=. streamlit run ui/streamlit_app.py
 ```
 
 ## Features
@@ -39,10 +39,11 @@ make ui              # streamlit run ui/streamlit_app.py
 ## Tests
 
 The pure helpers (`build_query_payload`, `parse_chain_response`,
-`ask_gateway`, etc.) are unit-tested under `tests/test_ui_client.py`
-**without** Streamlit installed. The `main()` function is only invoked
-by `streamlit run` and is excluded from coverage; if you change UI
-layout, run it locally and sanity-check by eye.
+`ask_gateway`, etc.) live in `ui/client.py` and are unit-tested under
+`tests/test_ui_client.py` **without** Streamlit installed.
+`ui/streamlit_app.py` imports Streamlit at module scope and is only
+invoked by `streamlit run`; if you change UI layout, run it locally and
+sanity-check by eye.
 
 ## Configuration
 

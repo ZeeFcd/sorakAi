@@ -2,8 +2,8 @@
 
 The Streamlit runtime is intentionally NOT a dev/test dependency (it's
 under the optional ``requirements-ui.txt`` extra). The pure helpers in
-:mod:`ui.streamlit_app` are import-safe without it, and this file pins
-their behaviour so the gateway contract stays in sync with the UI.
+:mod:`ui.client` are import-safe without it, and this file pins their
+behaviour so the gateway contract stays in sync with the UI.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from ui.streamlit_app import (
+from ui.client import (
     ChatAnswer,
     ask_gateway,
     build_agent_payload,

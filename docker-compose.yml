@@ -2,7 +2,8 @@
 # Override model: OLLAMA_MODEL=phi3:mini docker compose up --build
 # MLflow UI: http://127.0.0.1:5000
 # Wave 8 observability:
-#   - Set OTEL_EXPORTER=otlp to ship spans to the optional Jaeger service:
+#   - Set OTEL_EXPORTER=otlp and OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+#     to ship spans to the optional Jaeger service:
 #       docker compose --profile otel up --build
 #     then open Jaeger UI at http://127.0.0.1:16686.
 #   - Set LOG_FORMAT=console for human-readable logs (default is JSON).
@@ -11,8 +12,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mlflow
-    ports:
-      - "5000:5000"
+    network_mode: host
     volumes:
       - mlflow_data:/mlflow
     healthcheck:
@@ -30,37 +30,39 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    network_mode: host
 
   # Wave 5/6: Qdrant vector DB. Wave 6 flips ingest + rag to ``VECTOR_STORE=qdrant``
   # by default; override per-service via env if you'd rather stay on the
   # Redis-backed in-process KnowledgeStore. Volume keeps the collection across restarts.
   qdrant:
     image: qdrant/qdrant:v1.18.0
-    ports:
-      - "6333:6333"  # HTTP/REST
-      - "6334:6334"  # gRPC
+    network_mode: host
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--spider",
-          "--quiet",
-          "http://127.0.0.1:6333/readyz",
-        ]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-      start_period: 15s
+
+  # Qdrant's image is intentionally tiny and does not consistently ship
+  # curl/wget/bash. Keep the readiness probe in a purpose-built curl
+  # sidecar instead of assuming tools inside the database image.
+  qdrant-ready:
+    image: curlimages/curl:8.11.1
+    network_mode: host
+    depends_on:
+      qdrant:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until curl -fsS "http://127.0.0.1:6333/readyz" >/dev/null; do
+          echo "Waiting for Qdrant..."
+          sleep 2
+        done
+        echo "Qdrant ready."
+    restart: "no"
 
   ollama:
     image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
+    network_mode: host
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
@@ -73,6 +75,7 @@ services:
   # One-shot: pull via Ollama HTTP API (CLI `ollama pull` may try to open a TUI without /dev/tty).
   ollama-model:
     image: curlimages/curl:8.11.1
+    network_mode: host
     environment:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
       OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
@@ -84,11 +87,11 @@ services:
     command:
       - |
         echo "Pulling model $$OLLAMA_MODEL ..."
-        curl -sS -N -X POST "http://ollama:11434/api/pull" \
+        curl -sS -N -X POST "http://127.0.0.1:11434/api/pull" \
           -H "Content-Type: application/json" \
           -d "{\"name\":\"$$OLLAMA_MODEL\"}"
         echo "Pulling embed model $$OLLAMA_EMBED_MODEL ..."
-        curl -sS -N -X POST "http://ollama:11434/api/pull" \
+        curl -sS -N -X POST "http://127.0.0.1:11434/api/pull" \
           -H "Content-Type: application/json" \
           -d "{\"name\":\"$$OLLAMA_EMBED_MODEL\"}"
         echo "Pull finished."
@@ -99,12 +102,10 @@ services:
   # When started, every service auto-points its OTLP exporter at jaeger:4317.
   jaeger:
     image: jaegertracing/all-in-one:1.62
+    network_mode: host
     profiles: ["otel"]
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-    ports:
-      - "16686:16686"  # UI
-      - "4317:4317"    # OTLP gRPC ingest
     healthcheck:
       test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:14269/ || exit 1"]
       interval: 10s
@@ -118,30 +119,29 @@ services:
       dockerfile: Dockerfile
       args:
         SORAKAI_SERVICE: ingest
+    network_mode: host
     environment:
       PORT: "8001"
-      REDIS_URL: redis://redis:6379/0
-      MLFLOW_TRACKING_URI: http://mlflow:5000
+      REDIS_URL: redis://127.0.0.1:6379/0
+      MLFLOW_TRACKING_URI: http://127.0.0.1:5000
       EMBEDDING_PROVIDER: ollama
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       VECTOR_STORE: ${VECTOR_STORE:-qdrant}
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: http://127.0.0.1:6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-sorakai_kb}
       # Wave 8: ship spans to Jaeger when the otel profile is active.
       OTEL_ENABLED: ${OTEL_ENABLED:-true}
       OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       LOG_FORMAT: ${LOG_FORMAT:-json}
-    ports:
-      - "8001:8001"
     depends_on:
       redis:
         condition: service_started
       mlflow:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
+      qdrant-ready:
+        condition: service_completed_successfully
       ollama-model:
         condition: service_completed_successfully
 
@@ -151,34 +151,33 @@ services:
       dockerfile: Dockerfile
       args:
         SORAKAI_SERVICE: rag
+    network_mode: host
     environment:
       PORT: "8002"
-      REDIS_URL: redis://redis:6379/0
-      MLFLOW_TRACKING_URI: http://mlflow:5000
+      REDIS_URL: redis://127.0.0.1:6379/0
+      MLFLOW_TRACKING_URI: http://127.0.0.1:5000
       # Fully local: Ollama for both chat and embeddings (no cloud providers).
       LLM_PROVIDER: ollama
       EMBEDDING_PROVIDER: ollama
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
       OLLAMA_CHAT_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       VECTOR_STORE: ${VECTOR_STORE:-qdrant}
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: http://127.0.0.1:6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-sorakai_kb}
       HYBRID_RETRIEVER_ENABLED: ${HYBRID_RETRIEVER_ENABLED:-true}
       # Wave 8 observability.
       OTEL_ENABLED: ${OTEL_ENABLED:-true}
       OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       LOG_FORMAT: ${LOG_FORMAT:-json}
-    ports:
-      - "8002:8002"
     depends_on:
       redis:
         condition: service_started
       mlflow:
         condition: service_healthy
-      qdrant:
-        condition: service_healthy
+      qdrant-ready:
+        condition: service_completed_successfully
       ollama-model:
         condition: service_completed_successfully
 
@@ -188,14 +187,15 @@ services:
       dockerfile: Dockerfile
       args:
         SORAKAI_SERVICE: gateway
+    network_mode: host
     environment:
       PORT: "8000"
-      INGEST_SERVICE_URL: http://ingest:8001
-      RAG_SERVICE_URL: http://rag:8002
+      INGEST_SERVICE_URL: http://127.0.0.1:8001
+      RAG_SERVICE_URL: http://127.0.0.1:8002
       # Wave 8 observability.
       OTEL_ENABLED: ${OTEL_ENABLED:-true}
       OTEL_EXPORTER: ${OTEL_EXPORTER:-console}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       LOG_FORMAT: ${LOG_FORMAT:-json}
       # Wave 10 gateway hardening. Leave GATEWAY_API_KEY blank to keep
       # the gateway open (the default for local stacks); set it to flip
@@ -207,8 +207,6 @@ services:
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-0}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-20}
       REQUEST_MAX_BYTES: ${REQUEST_MAX_BYTES:-10485760}
-    ports:
-      - "8000:8000"
     depends_on:
       - ingest
       - rag
@@ -218,17 +216,18 @@ services:
   # Then open http://127.0.0.1:8501.
   ui:
     image: python:3.12-slim
+    network_mode: host
     profiles: ["ui"]
     working_dir: /app
     environment:
-      UI_GATEWAY_URL: ${UI_GATEWAY_URL:-http://gateway:8000}
+      UI_GATEWAY_URL: ${UI_GATEWAY_URL:-http://127.0.0.1:8000}
       PYTHONUNBUFFERED: "1"
-    ports:
-      - "8501:8501"
+      PYTHONPATH: /app
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+      PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.org files.pythonhosted.org}
     volumes:
       - ./ui:/app/ui:ro
-      - ./requirements-ui.in:/app/requirements-ui.in:ro
-      - ./requirements.in:/app/requirements.in:ro
+      - ./requirements-ui.txt:/app/requirements-ui.txt:ro
     # Install deps once on boot to keep the image cache-light; production
     # deployments should bake an image from a Dockerfile pinned to
     # requirements-ui.txt instead.
@@ -236,7 +235,7 @@ services:
       - bash
       - -ceu
       - |
-        pip install --quiet streamlit>=1.36.0 httpx
+        pip install --quiet -r requirements-ui.txt
         exec streamlit run ui/streamlit_app.py --server.address 0.0.0.0
     depends_on:
       - gateway

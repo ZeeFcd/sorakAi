@@ -39,6 +39,8 @@ from sorakai.common.telemetry import (
 )
 from sorakai.core.errors import DimensionMismatchError
 from sorakai.core.logging import configure_logging
+from sorakai.infra.vector_store.base import VectorDoc, VectorStore
+from sorakai.infra.vector_store.factory import get_vector_store
 
 logger = get_logger("sorakai.ingest")
 
@@ -51,8 +53,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     instrument_fastapi(app)
     instrument_httpx()
     store = create_store(settings.redis_url)
+    vector_store = get_vector_store(settings)
     kb_meta = create_kb_meta_store(settings.redis_url)
     app.state.store = store
+    app.state.vector_store = vector_store
     app.state.kb_meta = kb_meta
     logger.info(
         "Ingest service started (redis=%s, embedding_provider=%s)",
@@ -62,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     if isinstance(store, RedisKnowledgeStore):
         await store.aclose()
+    await vector_store.aclose()
     if isinstance(kb_meta, RedisKBMetaStore):
         await kb_meta.aclose()
     logger.info("Ingest service shutdown")
@@ -181,11 +186,20 @@ def create_app() -> FastAPI:
                 ) from exc
 
         doc_id = body.document_id or new_document_id()
+        vector_store: VectorStore = request.app.state.vector_store
+        vector_docs = _to_vector_docs(
+            doc_id=doc_id,
+            filename=body.filename,
+            chunks=chunks,
+            vectors=vectors,
+            mime_type=body.mime_type,
+        )
         if body.replace_kb:
             # Wave 4: store write happens BEFORE the meta swap so a meta-write
             # failure leaves a self-consistent (chunks + stale-meta) state that
             # the dim guard surfaces as 409 on the next request - never the
             # silent corruption the meta-first ordering used to produce.
+            await _replace_vector_store_with_document(vector_store, vector_docs)
             await store.replace_kb_with_document(
                 doc_id,
                 body.filename,
@@ -195,6 +209,7 @@ def create_app() -> FastAPI:
             )
             await kb_meta.reset_to(candidate)
         else:
+            await vector_store.upsert(vector_docs)
             await store.append_document(
                 doc_id,
                 body.filename,
@@ -260,12 +275,14 @@ def create_app() -> FastAPI:
         if not doc_id.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_id must not be empty")
         store: KnowledgeStore = request.app.state.store
+        vector_store: VectorStore = request.app.state.vector_store
         removed = await store.delete_document(doc_id)
         if removed == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No document with doc_id={doc_id!r}",
             )
+        await vector_store.delete_doc(doc_id)
         return DocumentDeleteResponse(
             doc_id=doc_id,
             removed_chunks=removed,
@@ -274,6 +291,40 @@ def create_app() -> FastAPI:
 
     register_bundled_openapi_routes(app, "ingest")
     return app
+
+
+def _to_vector_docs(
+    *,
+    doc_id: str,
+    filename: str,
+    chunks: list[str],
+    vectors: list[Any],
+    mime_type: str | None,
+) -> list[VectorDoc]:
+    total = len(chunks)
+    return [
+        VectorDoc(
+            page_content=chunk,
+            embedding=vector,
+            metadata={
+                "doc_id": doc_id,
+                "filename": filename,
+                "chunk_index": idx,
+                "chunk_total": total,
+                "mime": mime_type,
+            },
+        )
+        for idx, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
+    ]
+
+
+async def _replace_vector_store_with_document(
+    vector_store: VectorStore,
+    docs: list[VectorDoc],
+) -> None:
+    for summary in await vector_store.list_docs():
+        await vector_store.delete_doc(summary.doc_id)
+    await vector_store.upsert(docs)
 
 
 app = create_app()

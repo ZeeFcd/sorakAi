@@ -10,6 +10,7 @@ MYPY       := $(VENV)/bin/mypy
 PYTEST     := $(VENV)/bin/pytest
 PIP_COMPILE := $(VENV)/bin/pip-compile
 PRECOMMIT  := $(VENV)/bin/pre-commit
+DOCKER_API_VERSION ?= 1.44
 
 PKG        := sorakai
 TEST_DIR   := tests
@@ -47,7 +48,7 @@ install-ui: ## Install the Streamlit UI deps (heavy; not needed by services)
 	$(PIP) install -r requirements-ui.txt
 
 ui: ## Launch the Streamlit chat UI against the gateway
-	$(VENV)/bin/streamlit run ui/streamlit_app.py
+	PYTHONPATH=$(PWD) $(VENV)/bin/streamlit run ui/streamlit_app.py
 
 lint: ## Run ruff (must be green on PR)
 	$(RUFF) check $(PKG) $(TEST_DIR) scripts ui
@@ -80,10 +81,10 @@ dev: ## Bring up the full compose stack, wait for /health, seed sample corpus, f
 dev-up: dev ## Alias for `make dev` (matches scripts/dev_up.sh naming)
 
 up: ## docker compose up --build -d (no seed / wait loop)
-	docker compose up --build -d
+	DOCKER_API_VERSION=$(DOCKER_API_VERSION) docker compose up --build -d
 
 down: ## docker compose down -v
-	docker compose down -v
+	DOCKER_API_VERSION=$(DOCKER_API_VERSION) docker compose down -v
 
 seed: ## Seed the bundled sample corpus into a running gateway
 	$(PY) scripts/seed.py
